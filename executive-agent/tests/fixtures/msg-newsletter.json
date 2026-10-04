@@ -1,0 +1,59 @@
+{
+  "id": "msg-newsletter",
+  "threadId": "thread-newsletter",
+  "historyId": "1000",
+  "internalDate": "1759641600000",
+  "labelIds": [
+    "INBOX",
+    "CATEGORY_PROMOTIONS",
+    "UNREAD"
+  ],
+  "snippet": "Here are ten links you might like.",
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "headers": [
+      {
+        "name": "From",
+        "value": "News <noreply@news.example>"
+      },
+      {
+        "name": "To",
+        "value": "Owner <owner@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Weekly product roundup"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<msg-newsletter@example.com>"
+      },
+      {
+        "name": "Date",
+        "value": "Sun, 05 Oct 2025 09:00:00 +0530"
+      },
+      {
+        "name": "List-Unsubscribe",
+        "value": "<mailto:unsubscribe@news.example>"
+      },
+      {
+        "name": "Precedence",
+        "value": "bulk"
+      }
+    ],
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "body": {
+          "data": "SGVyZSBhcmUgdGVuIGxpbmtzIHlvdSBtaWdodCBsaWtlLg=="
+        }
+      },
+      {
+        "mimeType": "text/html",
+        "body": {
+          "data": "PGh0bWw-PGJvZHk-PHNjcmlwdD5zdGVhbCgpPC9zY3JpcHQ-PHA-V2Vla2x5IHByb2R1Y3Qgcm91bmR1cDwvcD48L2JvZHk-PC9odG1sPg=="
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+jobs: role, company, location, stipend, deadline, link, score
+hackathons: name, organizer, prize, team size, mode, registration deadline, submission deadline, link
+events: date, venue, link
+scholarships: eligibility, deadline, link
+Score fit from 0 to 100 against the interest profile and give one reason. Deduplicate the same posting.

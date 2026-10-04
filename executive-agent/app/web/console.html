@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Night Ledger</title>
+  <style>
+    :root {
+      --ink: #16120e;
+      --panel: #221c16;
+      --paper: #f4ecdf;
+      --muted: #b7aa98;
+      --line: rgba(244, 236, 223, 0.12);
+      --amber: #e2a04a;
+      --signal: #e15d45;
+      --moss: #7ea58a;
+      --info: #d7c7ae;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--paper);
+      background:
+        radial-gradient(1200px 500px at 10% -10%, rgba(226, 160, 74, 0.16), transparent 55%),
+        linear-gradient(180deg, #1c1712 0%, var(--ink) 40%);
+      font-family: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      align-items: flex-end;
+      padding: 28px 32px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .mark {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+    }
+    .seal {
+      width: 14px;
+      height: 42px;
+      background: var(--amber);
+      border-radius: 2px;
+    }
+    h1 {
+      margin: 0;
+      font-weight: 500;
+      font-size: 34px;
+      letter-spacing: -0.04em;
+    }
+    p { margin: 4px 0 0; color: var(--muted); font-family: "Segoe UI", sans-serif; font-size: 14px; }
+    .stats {
+      display: flex;
+      gap: 18px;
+      font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .stats strong { color: var(--paper); font-weight: 500; }
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      padding: 16px 32px;
+      position: sticky;
+      top: 0;
+      background: rgba(22, 18, 14, 0.92);
+      backdrop-filter: blur(8px);
+      z-index: 2;
+    }
+    input {
+      flex: 1;
+      background: var(--panel);
+      color: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 12px 16px;
+      font: 14px "Segoe UI", sans-serif;
+    }
+    button, .chip {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--paper);
+      border-radius: 999px;
+      padding: 8px 14px;
+      font: 13px "Segoe UI", sans-serif;
+      cursor: pointer;
+    }
+    button[aria-pressed="true"], .chip[aria-pressed="true"] {
+      background: var(--paper);
+      color: var(--ink);
+      border-color: var(--paper);
+    }
+    main { padding: 8px 32px 48px; }
+    .row {
+      display: grid;
+      grid-template-columns: 168px 84px minmax(180px, 280px) 1fr;
+      gap: 14px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+      font-family: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .time, .event { color: var(--muted); }
+    .event { color: var(--paper); }
+    .level { letter-spacing: 0.08em; text-transform: uppercase; font-size: 11px; }
+    .level.info { color: var(--info); }
+    .level.warning { color: var(--amber); }
+    .level.error { color: var(--signal); }
+    .detail { color: var(--paper); white-space: pre-wrap; word-break: break-word; }
+    .empty {
+      padding: 48px 0;
+      color: var(--muted);
+      font-family: "Segoe UI", sans-serif;
+    }
+    @media (max-width: 800px) {
+      header, .toolbar, main { padding-left: 16px; padding-right: 16px; }
+      header { flex-direction: column; align-items: flex-start; }
+      .row { grid-template-columns: 1fr; gap: 4px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="mark">
+      <div class="seal" aria-hidden="true"></div>
+      <div>
+        <h1>Night Ledger</h1>
+        <p>Redacted backend activity for this executive agent. Nothing here leaves this machine.</p>
+      </div>
+    </div>
+    <div class="stats">
+      <span>Live <strong id="live">—</strong></span>
+      <span>Shown <strong id="shown">0</strong></span>
+      <span>Errors <strong id="errors">0</strong></span>
+    </div>
+  </header>
+  <div class="toolbar">
+    <input id="query" type="search" placeholder="Search event or detail" aria-label="Search logs" />
+    <button class="chip" data-level="" aria-pressed="true">All</button>
+    <button class="chip" data-level="info">Info</button>
+    <button class="chip" data-level="warning">Warning</button>
+    <button class="chip" data-level="error">Error</button>
+    <button id="pause" aria-pressed="false">Pause</button>
+  </div>
+  <main id="tape"></main>
+  <script>
+    const state = { level: "", query: "", paused: false, events: [] };
+    const tape = document.getElementById("tape");
+    const query = document.getElementById("query");
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    function render() {
+      const needle = state.query.trim().toLowerCase();
+      const rows = state.events.filter((row) => {
+        if (state.level && row.level !== state.level) return false;
+        if (!needle) return true;
+        return `${row.event} ${row.detail}`.toLowerCase().includes(needle);
+      });
+      document.getElementById("shown").textContent = String(rows.length);
+      document.getElementById("errors").textContent = String(
+        state.events.filter((row) => row.level === "error").length
+      );
+      if (!rows.length) {
+        tape.innerHTML = '<div class="empty">No matching events yet. Send the bot a message and this tape will fill in.</div>';
+        return;
+      }
+      tape.innerHTML = rows.slice().reverse().map((row) => `
+        <article class="row">
+          <div class="time">${escapeHtml(row.timestamp.replace("T", " ").replace("+00:00", "Z"))}</div>
+          <div class="level ${escapeHtml(row.level)}">${escapeHtml(row.level)}</div>
+          <div class="event">${escapeHtml(row.event)}</div>
+          <div class="detail">${escapeHtml(row.detail || "—")}</div>
+        </article>
+      `).join("");
+    }
+
+    async function refresh() {
+      if (state.paused) return;
+      try {
+        const response = await fetch("/api/logs?limit=400", { cache: "no-store" });
+        if (!response.ok) throw new Error(String(response.status));
+        const payload = await response.json();
+        state.events = payload.events || [];
+        document.getElementById("live").textContent = "on";
+        render();
+      } catch (error) {
+        document.getElementById("live").textContent = "off";
+      }
+    }
+
+    document.querySelectorAll(".chip").forEach((button) => {
+      button.addEventListener("click", () => {
+        state.level = button.dataset.level || "";
+        document.querySelectorAll(".chip").forEach((item) => {
+          item.setAttribute("aria-pressed", item === button ? "true" : "false");
+        });
+        render();
+      });
+    });
+    query.addEventListener("input", () => {
+      state.query = query.value;
+      render();
+    });
+    document.getElementById("pause").addEventListener("click", (event) => {
+      state.paused = !state.paused;
+      event.currentTarget.setAttribute("aria-pressed", state.paused ? "true" : "false");
+      event.currentTarget.textContent = state.paused ? "Resume" : "Pause";
+    });
+    refresh();
+    setInterval(refresh, 3000);
+  </script>
+</body>
+</html>

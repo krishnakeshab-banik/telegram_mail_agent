@@ -1,0 +1,44 @@
+{
+  "id": "msg-followup-1",
+  "threadId": "thread-followup",
+  "historyId": "1000",
+  "internalDate": "1759555200000",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "What did you decide about invoice 1842? I need a reply.",
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Rahul Jain <rahul.jain@example.com>"
+      },
+      {
+        "name": "To",
+        "value": "Owner <owner@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Question about the invoice"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<msg-followup-1@example.com>"
+      },
+      {
+        "name": "Date",
+        "value": "Sun, 05 Oct 2025 09:00:00 +0530"
+      }
+    ],
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "body": {
+          "data": "V2hhdCBkaWQgeW91IGRlY2lkZSBhYm91dCBpbnZvaWNlIDE4NDI_IEkgbmVlZCBhIHJlcGx5Lg=="
+        }
+      }
+    ]
+  }
+}

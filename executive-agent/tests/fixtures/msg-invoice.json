@@ -1,0 +1,52 @@
+{
+  "id": "msg-invoice",
+  "threadId": "thread-invoice",
+  "historyId": "1000",
+  "internalDate": "1759641600000",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "Invoice 1842 is due tomorrow. Amount due: 1200 USD. Please arrange payment.",
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Billing <billing@vendor.example>"
+      },
+      {
+        "name": "To",
+        "value": "Owner <owner@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Invoice 1842 for 1200 USD"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<msg-invoice@example.com>"
+      },
+      {
+        "name": "Date",
+        "value": "Sun, 05 Oct 2025 09:00:00 +0530"
+      }
+    ],
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "body": {
+          "data": "SW52b2ljZSAxODQyIGlzIGR1ZSB0b21vcnJvdy4gQW1vdW50IGR1ZTogMTIwMCBVU0QuIFBsZWFzZSBhcnJhbmdlIHBheW1lbnQu"
+        }
+      },
+      {
+        "filename": "invoice.txt",
+        "mimeType": "text/plain",
+        "body": {
+          "attachmentId": "att-invoice",
+          "size": 48
+        }
+      }
+    ]
+  }
+}

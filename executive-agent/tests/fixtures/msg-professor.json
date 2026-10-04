@@ -1,0 +1,44 @@
+{
+  "id": "msg-professor",
+  "threadId": "thread-professor",
+  "historyId": "1000",
+  "internalDate": "1759641600000",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "The assignment deadline is Friday at 5pm. Submit the paper before then.",
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Dr. Mehta <mehta@university.example>"
+      },
+      {
+        "name": "To",
+        "value": "Owner <owner@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Assignment deadline Friday"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<msg-professor@example.com>"
+      },
+      {
+        "name": "Date",
+        "value": "Sun, 05 Oct 2025 09:00:00 +0530"
+      }
+    ],
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "body": {
+          "data": "VGhlIGFzc2lnbm1lbnQgZGVhZGxpbmUgaXMgRnJpZGF5IGF0IDVwbS4gU3VibWl0IHRoZSBwYXBlciBiZWZvcmUgdGhlbi4="
+        }
+      }
+    ]
+  }
+}

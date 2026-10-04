@@ -1,0 +1,44 @@
+{
+  "id": "msg-meeting",
+  "threadId": "thread-meeting",
+  "historyId": "1000",
+  "internalDate": "1759641600000",
+  "labelIds": [
+    "INBOX",
+    "UNREAD"
+  ],
+  "snippet": "Can we meet next Tuesday at 3pm to review the launch plan?\nhttps://meet.google.com/abc-defg-hij\nPlease reply so I can bo",
+  "payload": {
+    "mimeType": "multipart/alternative",
+    "headers": [
+      {
+        "name": "From",
+        "value": "Priya Shah <priya.shah@example.com>"
+      },
+      {
+        "name": "To",
+        "value": "Owner <owner@example.com>"
+      },
+      {
+        "name": "Subject",
+        "value": "Design review next Tuesday"
+      },
+      {
+        "name": "Message-ID",
+        "value": "<msg-meeting@example.com>"
+      },
+      {
+        "name": "Date",
+        "value": "Sun, 05 Oct 2025 09:00:00 +0530"
+      }
+    ],
+    "parts": [
+      {
+        "mimeType": "text/plain",
+        "body": {
+          "data": "Q2FuIHdlIG1lZXQgbmV4dCBUdWVzZGF5IGF0IDNwbSB0byByZXZpZXcgdGhlIGxhdW5jaCBwbGFuPwpodHRwczovL21lZXQuZ29vZ2xlLmNvbS9hYmMtZGVmZy1oaWoKUGxlYXNlIHJlcGx5IHNvIEkgY2FuIGJvb2sgdGhlIHJvb20u"
+        }
+      }
+    ]
+  }
+}

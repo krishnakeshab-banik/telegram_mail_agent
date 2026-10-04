@@ -1,0 +1,4 @@
+Short: one or two sentences in the owner's voice
+Detailed: a fuller reply that does not invent facts
+Decline: a polite decline or deferral when a no is reasonable
+Never include a send instruction. Ask a short question when a price, date, or file is missing.
