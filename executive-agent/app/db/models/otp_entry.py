@@ -6,10 +6,11 @@ from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class OtpEntry(Base):
+class OtpEntry(OwnedMixin, Base):
     """Encrypted OTP. The Telegram view only shows a mask until reveal."""
 
     __tablename__ = "otp_entries"

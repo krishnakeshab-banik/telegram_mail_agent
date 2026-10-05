@@ -6,13 +6,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.constants import GOOGLE_SCOPES
 from app.db.base import create_engine, create_session_factory
 from app.db.migrate import upgrade_database
+from app.db.user_context import user_scope
 from app.google.auth import GoogleAuth
+from app.services.user_service import UserService
 from app.utils.logging import configure_logging
 from google_auth_oauthlib.flow import InstalledAppFlow
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 
 def main() -> None:
@@ -35,17 +38,38 @@ def main() -> None:
         )
     engine = create_engine(settings.database_url)
     sessions = create_session_factory(engine)
-    auth = GoogleAuth(sessions, settings)
     asyncio.run(
-        auth.save_tokens(
-            access_token=credentials.token or "",
-            refresh_token=credentials.refresh_token,
-            expiry=credentials.expiry,
-            account_email="",
+        _save(
+            sessions,
+            settings,
+            credentials.token or "",
+            credentials.refresh_token,
+            credentials.expiry,
         )
     )
     asyncio.run(engine.dispose())
     print("Google authorization saved. Restart the bot.")
+
+
+async def _save(
+    sessions: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    access_token: str,
+    refresh_token: str,
+    expiry: object,
+) -> None:
+    """Store the developer token on the migrated owner account."""
+    from datetime import datetime
+
+    owner = await UserService(sessions, settings).ensure_owner()
+    moment = expiry if isinstance(expiry, datetime) else None
+    with user_scope(owner.id):
+        await GoogleAuth(sessions, settings).save_tokens(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expiry=moment,
+            account_email="",
+        )
 
 
 def _client_config(client_id: str, client_secret: str) -> dict[str, dict[str, str]]:

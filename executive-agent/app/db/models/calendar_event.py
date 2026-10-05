@@ -7,10 +7,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.constants import CalendarEventStatus
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class CalendarEvent(Base):
+class CalendarEvent(OwnedMixin, Base):
     """Meeting proposal or a Google Calendar event created by the agent."""
 
     __tablename__ = "calendar_events"

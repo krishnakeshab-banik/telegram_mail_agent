@@ -22,6 +22,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     services = container_from(context)
     user_id = require_user_id(update)
+    signup_reply = await services.accounts.accept_text(user_id, message.text)
+    if signup_reply is not None:
+        await commands.send_flow(update, signup_reply)
+        return
     try:
         preview = await services.replies.apply_pending_edit(user_id, message.text)
         if preview is not None:

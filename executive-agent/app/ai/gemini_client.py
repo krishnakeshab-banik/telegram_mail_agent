@@ -1,33 +1,51 @@
 """Single Gemini wrapper with retries, rate limits, and JSON schema output."""
 
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from pydantic import BaseModel
 
-from app.exceptions import GeminiError, QuotaExceededError
+from app.exceptions import GeminiError, ModelUnavailable
 from app.utils.logging import get_logger
 from app.utils.rate_limit import AsyncRateLimiter
 from app.utils.retry import async_retry
 from app.utils.security import redact
 
 logger = get_logger(__name__)
-_FALLBACK_MODELS = ("gemini-3.5-flash", "gemini-flash-latest", "gemini-3.1-flash-lite")
+ChainHandler = Callable[[str], Awaitable[None]]
+_SKIP_CODES = {404, 429, 503}
 
 
 class GeminiClient:
     """Async Gemini client. Callers pass prompts; this class never logs them."""
 
-    def __init__(self, api_key: str, *, requests_per_minute: int) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        requests_per_minute: int,
+        models: tuple[str, ...] = (),
+    ) -> None:
         """Create a client.
 
         Args:
             api_key: Gemini API key. Empty disables live calls.
             requests_per_minute: Local rate limit shared by every method.
+            models: Names to try, in order. The last one that answered is tried first.
         """
         self._api_key = api_key
+        self._models = models
         self._limiter = AsyncRateLimiter(requests_per_minute)
         self._client: Any = None
+        self._working = ""
+        self.last_model = ""
+        self._chain_alerted = False
+        self._chain_handler: ChainHandler | None = None
+
+    def set_chain_handler(self, handler: ChainHandler) -> None:
+        """Notify admins once when every configured model has failed."""
+        self._chain_handler = handler
 
     @property
     def enabled(self) -> bool:
@@ -50,7 +68,6 @@ class GeminiClient:
     async def generate_json(
         self,
         *,
-        model: str,
         system_prompt: str,
         user_prompt: str,
         schema: type[BaseModel],
@@ -58,7 +75,6 @@ class GeminiClient:
         """Generate a JSON object validated later by the caller.
 
         Args:
-            model: Gemini model name from settings.
             system_prompt: Trusted instruction text.
             user_prompt: User or wrapped-untrusted content.
             schema: Pydantic model whose schema is sent to Gemini.
@@ -66,28 +82,16 @@ class GeminiClient:
         Returns:
             Parsed JSON object.
         """
-        last_error: Exception | None = None
-        for candidate in fallback_models(model):
-            try:
-                text = await self._generate(
-                    model=candidate,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    schema=schema,
-                )
-                return _parse_json_object(text)
-            except QuotaExceededError as exc:
-                last_error = exc
-                logger.warning("gemini_model_fallback", model=candidate)
-        if last_error is not None:
-            raise last_error
-        raise GeminiError("Gemini request failed.")
+        return await self._walk(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            schema=schema,
+        )
 
     @async_retry()
     async def generate_with_media(
         self,
         *,
-        model: str,
         system_prompt: str,
         user_prompt: str,
         media: bytes,
@@ -97,7 +101,6 @@ class GeminiClient:
         """Generate JSON from a prompt plus one image or PDF payload.
 
         Args:
-            model: Gemini model name.
             system_prompt: Trusted instruction text.
             user_prompt: Wrapped untrusted instructions for the document.
             media: Raw file bytes.
@@ -110,13 +113,57 @@ class GeminiClient:
         from google.genai import types
 
         part = types.Part.from_bytes(data=media, mime_type=mime_type)
-        text = await self._generate(
-            model=model,
+        return await self._walk(
             system_prompt=system_prompt,
             user_prompt=[part, user_prompt],
             schema=schema,
         )
-        return _parse_json_object(text)
+
+    async def _walk(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str | list[Any],
+        schema: type[BaseModel],
+    ) -> dict[str, Any]:
+        order = self._order()
+        if not order:
+            raise GeminiError("GEMINI_MODEL_CHAIN is not set.")
+        failures: list[tuple[str, object]] = []
+        for candidate in order:
+            try:
+                text = await self._generate(
+                    model=candidate,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    schema=schema,
+                )
+            except ModelUnavailable as exc:
+                failures.append((candidate, exc.code))
+                logger.warning("gemini_model_fallback", model=candidate, code=exc.code)
+                continue
+            self._working = candidate
+            self.last_model = candidate
+            return _parse_json_object(text)
+        await self._note_exhausted(failures)
+        raise GeminiError("Gemini request failed.")
+
+    def _order(self) -> tuple[str, ...]:
+        if self._working and self._working in self._models:
+            rest = tuple(name for name in self._models if name != self._working)
+            return (self._working, *rest)
+        return self._models
+
+    async def _note_exhausted(self, failures: list[tuple[str, object]]) -> None:
+        if not failures or self._chain_alerted:
+            return
+        self._chain_alerted = True
+        detail = "; ".join(f"{name} {code}" for name, code in failures)
+        notice = f"Gemini model chain failed. {detail}"
+        logger.error("gemini_chain_failed", detail=detail)
+        handler = self._chain_handler
+        if handler is not None:
+            await handler(notice)
 
     async def _generate(
         self,
@@ -152,29 +199,12 @@ class GeminiClient:
         return text
 
 
-def fallback_models(preferred: str) -> tuple[str, ...]:
-    """Return the preferred model followed by known available alternates.
-
-    Args:
-        preferred: Model name from settings.
-
-    Returns:
-        Unique model names to try in order.
-    """
-    ordered = [preferred, *_FALLBACK_MODELS]
-    unique: list[str] = []
-    for name in ordered:
-        if name and name not in unique:
-            unique.append(name)
-    return tuple(unique)
-
-
 def _raise_api_error(exc: Exception) -> None:
     code = getattr(exc, "code", None)
     detail = redact(str(getattr(exc, "message", "") or "")).replace("\n", " ")[:240]
     logger.warning("gemini_request_failed", code=code, detail=detail)
-    if code in {429, 503}:
-        raise QuotaExceededError(f"Gemini quota exceeded ({code}). {detail}".strip()) from exc
+    if code in _SKIP_CODES:
+        raise ModelUnavailable(code) from exc
     raise GeminiError(f"Gemini request failed ({code}). {detail}".strip()) from exc
 
 

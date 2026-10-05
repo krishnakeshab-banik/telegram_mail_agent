@@ -6,10 +6,11 @@ from sqlalchemy import Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class StyleNote(Base):
+class StyleNote(OwnedMixin, Base):
     """Short note describing how the user changed a generated draft."""
 
     __tablename__ = "style_notes"

@@ -7,10 +7,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.constants import ApprovalStatus
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class Approval(Base):
+class Approval(OwnedMixin, Base):
     """Pending or resolved confirmation for an outbound action."""
 
     __tablename__ = "approvals"

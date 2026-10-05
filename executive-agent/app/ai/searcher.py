@@ -9,15 +9,13 @@ from app.utils.security import wrap_untrusted
 class MailSearcher:
     """Turn retrieved rows into an answer. It cannot send or mutate anything."""
 
-    def __init__(self, gemini: GeminiClient, model: str) -> None:
-        """Store the smart model used for answers.
+    def __init__(self, gemini: GeminiClient) -> None:
+        """Store the shared Gemini client.
 
         Args:
-            gemini: Shared Gemini wrapper.
-            model: Smart model name.
+            gemini: Shared Gemini wrapper. The model chain lives on the client.
         """
         self._gemini = gemini
-        self._model = model
 
     async def answer(self, question: str, intent: IntentSchema, records: list[str]) -> AnswerSchema:
         """Answer a question from retrieved email excerpts.
@@ -44,7 +42,6 @@ class MailSearcher:
             ]
         )
         payload = await self._gemini.generate_json(
-            model=self._model,
             system_prompt=load_prompt("compose_answer"),
             user_prompt=user_prompt,
             schema=AnswerSchema,

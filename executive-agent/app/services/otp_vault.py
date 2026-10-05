@@ -8,8 +8,10 @@ from app.db.base import session_scope
 from app.db.models.otp_entry import OtpEntry
 from app.db.repositories.email_repository import EmailRepository
 from app.db.repositories.folder_repository import FolderRepository
+from app.db.user_context import peek_user_id
+from app.exceptions import UnscopedQueryError
 from app.services.folder_rules import extract_code, looks_like_otp, mask_code
-from app.utils.security import decrypt_text, encrypt_text
+from app.utils.security import decrypt_for_user, encrypt_for_user
 from app.utils.time import utcnow
 
 REVEAL_SECONDS = 60
@@ -53,7 +55,7 @@ class OtpVault:
                         email_id=email_id,
                         sender=sender[:320],
                         masked_code=masked,
-                        encrypted_code=encrypt_text(code, self._key),
+                        encrypted_code=encrypt_for_user(code, self._key, _required_user_id()),
                     )
                 )
         return masked
@@ -71,7 +73,7 @@ class OtpVault:
             entry = await FolderRepository(session).otp_for_email(email_id)
         if entry is None:
             return "", REVEAL_SECONDS
-        return decrypt_text(entry.encrypted_code, self._key), REVEAL_SECONDS
+        return decrypt_for_user(entry.encrypted_code, self._key, entry.user_id), REVEAL_SECONDS
 
     async def purge_expired(self) -> int:
         """Blank OTP email bodies older than 24 hours.
@@ -93,3 +95,10 @@ class OtpVault:
                         stored.body_text = ""
                         cleared += 1
         return cleared
+
+
+def _required_user_id() -> int:
+    user_id = peek_user_id()
+    if user_id is None:
+        raise UnscopedQueryError("A user id is required to store a code.")
+    return user_id

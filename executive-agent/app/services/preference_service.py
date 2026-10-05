@@ -41,6 +41,7 @@ class UserPreferences:
     writing_style: str
     reminder_leads: tuple[int, ...]
     followup_nudge_hours: int
+    reminders_override_quiet: bool
 
 
 class PreferenceService:
@@ -111,6 +112,7 @@ class PreferenceService:
                 stored.get("followup_nudge_hours"),
                 self._settings.followup_nudge_hours,
             ),
+            reminders_override_quiet=_as_bool(stored.get("reminders_override_quiet"), default=True),
         )
 
     async def apply_command(self, text: str) -> str | None:
@@ -132,6 +134,24 @@ class PreferenceService:
             return "Updated quiet hours."
         await self._set(key, value)
         return f"Updated {key.replace('_', ' ')}."
+
+    async def set_reminders_override(self, enabled: bool) -> None:
+        """Store whether reminders may arrive during quiet hours. Default is on."""
+        await self._set("reminders_override_quiet", enabled)
+        from app.db.repositories.user_repository import UserRepository
+        from app.db.user_context import peek_user_id
+
+        user_id = peek_user_id()
+        if user_id is None:
+            return
+        async with session_scope(self._sessions) as session:
+            user = await UserRepository(session).get(user_id)
+            if user is not None:
+                user.reminders_override_quiet = enabled
+
+    async def set_reminder_leads(self, leads: tuple[int, ...]) -> None:
+        """Store the reminder offsets, in minutes, for this user."""
+        await self._set("reminder_leads", [int(item) for item in leads])
 
     async def set_tone(self, tone: str) -> None:
         """Set the default draft tone."""
@@ -243,7 +263,6 @@ class PreferenceService:
         if not self._gemini.enabled:
             return "Prefers the edited wording over the generated draft."
         payload = await self._gemini.generate_json(
-            model=self._settings.gemini_model_fast,
             system_prompt=load_prompt("style_extract"),
             user_prompt="\n".join(
                 [
@@ -277,6 +296,14 @@ class PreferenceService:
 
 def _as_int(value: object, default: int) -> int:
     return value if isinstance(value, int) else default
+
+
+def _as_bool(value: object, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"0", "false", "off", "no"}
+    return default
 
 
 def _clock(value: str, default_hour: int, default_minute: int) -> tuple[int, int]:

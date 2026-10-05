@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, or_, select, update
 
 from app.constants import EmailDirection, NotificationStatus
 from app.db.models.analysis import EmailAnalysis
@@ -16,24 +16,44 @@ class EmailRepository(BaseRepository):
 
     async def get(self, email_id: int) -> EmailMessage | None:
         """Return one message by primary key."""
-        return await self.session.get(EmailMessage, email_id)
+        return self.visible(await self.session.get(EmailMessage, email_id))
 
     async def get_by_gmail_id(self, gmail_message_id: str) -> EmailMessage | None:
         """Return a message by its Gmail id."""
-        statement = select(EmailMessage).where(EmailMessage.gmail_message_id == gmail_message_id)
+        statement = self.restrict(
+            select(EmailMessage).where(EmailMessage.gmail_message_id == gmail_message_id),
+            EmailMessage,
+        )
         return await self.session.scalar(statement)
 
     async def add(self, message: EmailMessage) -> EmailMessage:
         """Insert a message and flush so its id is available."""
+        self.stamp(message)
         self.session.add(message)
         await self.session.flush()
         return message
 
+    async def blank_bodies_before(self, moment: datetime) -> int:
+        """Erase message bodies older than a moment. Summaries stay on the analysis row."""
+        statement = (
+            update(EmailMessage)
+            .where(
+                EmailMessage.user_id == self.user_id,
+                EmailMessage.received_at < moment,
+                EmailMessage.body_text != "",
+            )
+            .values(body_text="")
+        )
+        result = await self.session.execute(statement)
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def list_unprocessed(self, limit: int = 20) -> list[EmailMessage]:
         """Return messages that do not yet have a finished pipeline run."""
         statement = (
-            select(EmailMessage)
-            .where(EmailMessage.processed_at.is_(None))
+            self.restrict(
+                select(EmailMessage).where(EmailMessage.processed_at.is_(None)),
+                EmailMessage,
+            )
             .order_by(EmailMessage.received_at.asc())
             .limit(limit)
         )
@@ -41,20 +61,20 @@ class EmailRepository(BaseRepository):
 
     async def count_unprocessed(self) -> int:
         """Count messages waiting for the pipeline."""
-        statement = (
+        statement = self.restrict(
             select(func.count())
             .select_from(EmailMessage)
-            .where(EmailMessage.processed_at.is_(None))
+            .where(EmailMessage.processed_at.is_(None)),
+            EmailMessage,
         )
         return int(await self.session.scalar(statement) or 0)
 
     async def list_thread(self, thread_id: str) -> list[EmailMessage]:
         """Return every stored message in a Gmail thread, oldest first."""
-        statement = (
-            select(EmailMessage)
-            .where(EmailMessage.thread_id == thread_id)
-            .order_by(EmailMessage.received_at.asc())
-        )
+        statement = self.restrict(
+            select(EmailMessage).where(EmailMessage.thread_id == thread_id),
+            EmailMessage,
+        ).order_by(EmailMessage.received_at.asc())
         return list(await self.session.scalars(statement))
 
     async def list_by_notification_status(
@@ -64,10 +84,12 @@ class EmailRepository(BaseRepository):
     ) -> list[EmailMessage]:
         """Return processed messages in a notification state."""
         statement = (
-            select(EmailMessage)
-            .where(
-                EmailMessage.notification_status == status,
-                EmailMessage.processed_at.is_not(None),
+            self.restrict(
+                select(EmailMessage).where(
+                    EmailMessage.notification_status == status,
+                    EmailMessage.processed_at.is_not(None),
+                ),
+                EmailMessage,
             )
             .order_by(EmailMessage.received_at.asc())
             .limit(limit)
@@ -148,63 +170,66 @@ class EmailRepository(BaseRepository):
 
     async def count_received_since(self, moment: datetime) -> int:
         """Count inbound messages received at or after a moment."""
-        statement = (
+        statement = self.restrict(
             select(func.count())
             .select_from(EmailMessage)
             .where(
                 EmailMessage.received_at >= moment,
                 EmailMessage.direction == EmailDirection.INBOUND,
-            )
+            ),
+            EmailMessage,
         )
         return int(await self.session.scalar(statement) or 0)
 
     async def count_important(self, threshold: int) -> int:
         """Count inbound messages at or above an importance threshold."""
-        statement = (
+        statement = self.restrict(
             select(func.count())
             .select_from(EmailMessage)
             .join(EmailAnalysis, EmailAnalysis.email_id == EmailMessage.id)
             .where(
                 EmailAnalysis.importance_score >= threshold,
                 EmailMessage.direction == EmailDirection.INBOUND,
-            )
+            ),
+            EmailMessage,
+            EmailAnalysis,
         )
         return int(await self.session.scalar(statement) or 0)
 
     async def list_recent_inbound(self, limit: int = 8) -> list[EmailMessage]:
         """Return recent inbound mail that is not marked bulk."""
-        statement = (
-            select(EmailMessage)
-            .where(
+        statement = self.restrict(
+            select(EmailMessage).where(
                 EmailMessage.direction == EmailDirection.INBOUND,
                 EmailMessage.is_bulk.is_(False),
-            )
-            .order_by(EmailMessage.received_at.desc())
-        )
+            ),
+            EmailMessage,
+        ).order_by(EmailMessage.received_at.desc())
         return list(await self.session.scalars(limit_query(statement, limit)))
 
     async def list_important(self, threshold: int, limit: int = 5) -> list[EmailMessage]:
         """Return recent high-importance inbound mail."""
-        statement = (
+        statement = self.restrict(
             select(EmailMessage)
             .join(EmailAnalysis, EmailAnalysis.email_id == EmailMessage.id)
             .where(
                 EmailAnalysis.importance_score >= threshold,
                 EmailMessage.direction == EmailDirection.INBOUND,
-            )
-            .order_by(EmailMessage.received_at.desc())
-        )
+            ),
+            EmailMessage,
+            EmailAnalysis,
+        ).order_by(EmailMessage.received_at.desc())
         return list(await self.session.scalars(limit_query(statement, limit)))
 
     async def list_unread(self, limit: int = 10) -> list[EmailMessage]:
         """Return recent unread inbound mail."""
-        statement = (
-            select(EmailMessage)
-            .where(
-                EmailMessage.is_unread.is_(True), EmailMessage.direction == EmailDirection.INBOUND
-            )
-            .order_by(EmailMessage.received_at.desc())
-        )
+        statement = self.restrict(
+            select(EmailMessage).where(
+                EmailMessage.is_unread.is_(True),
+                EmailMessage.direction == EmailDirection.INBOUND,
+            ),
+            EmailMessage,
+        ).order_by(EmailMessage.received_at.desc())
         return list(await self.session.scalars(limit_query(statement, limit)))
 
     def _search_statement(
@@ -218,7 +243,9 @@ class EmailRepository(BaseRepository):
         date_to: datetime | None,
         unread_only: bool,
     ) -> Select[Any]:
-        statement = select(EmailMessage).order_by(EmailMessage.received_at.desc())
+        statement = self.restrict(
+            select(EmailMessage).order_by(EmailMessage.received_at.desc()), EmailMessage
+        )
         if category or min_importance is not None:
             statement = statement.join(EmailAnalysis, EmailAnalysis.email_id == EmailMessage.id)
         if sender:

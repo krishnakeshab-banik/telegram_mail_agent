@@ -11,11 +11,14 @@ class AuditRepository(BaseRepository):
 
     async def add(self, entry: AuditLog) -> AuditLog:
         """Append an audit entry."""
+        self.stamp(entry)
         self.session.add(entry)
         await self.session.flush()
         return entry
 
     async def list_recent(self, limit: int = 15) -> list[AuditLog]:
         """Return the newest audit entries."""
-        statement = select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)
+        statement = self.restrict(select(AuditLog).order_by(AuditLog.id.desc()), AuditLog).limit(
+            limit
+        )
         return list(await self.session.scalars(statement))

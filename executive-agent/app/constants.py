@@ -177,6 +177,17 @@ class CallbackPrefix(StrEnum):
     OTP_REVEAL = "otp"
     REPLY_VARIANT = "rv"
     QUICK_REPLY = "qk"
+    SIGNUP_AGREE = "agr"
+    SIGNUP_PRIVACY = "prv"
+    SIGNUP_GOOGLE = "gol"
+    SIGNUP_TIMEZONE = "tz"
+    SIGNUP_QUIET = "qh"
+    SIGNUP_REMINDERS = "rm"
+    SIGNUP_DISCONNECT = "dc"
+    SIGNUP_DELETE = "da"
+    HOW = "how"
+    NAV = "nav"
+    SETTINGS = "stg"
 
 
 # Scopes are fixed at consent time. gmail.modify is required to attach labels

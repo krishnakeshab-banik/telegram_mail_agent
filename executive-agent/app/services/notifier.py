@@ -126,7 +126,8 @@ class Notifier:
         urgent = analysis.urgency in {Urgency.HIGH, Urgency.CRITICAL}
         if analysis.importance_score < prefs.importance_threshold and not urgent:
             return "skip"
-        if analysis.urgency == Urgency.CRITICAL:
+        phishing = analysis.summary.lower().startswith("suspicious")
+        if analysis.urgency == Urgency.CRITICAL or phishing:
             return "send"
         if in_quiet_hours(utcnow(), prefs.timezone, prefs.quiet_start, prefs.quiet_end):
             return "hold"

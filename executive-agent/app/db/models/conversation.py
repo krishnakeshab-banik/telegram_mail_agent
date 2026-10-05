@@ -6,10 +6,11 @@ from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class ConversationTurn(Base):
+class ConversationTurn(OwnedMixin, Base):
     """One user or assistant message in the natural-language conversation."""
 
     __tablename__ = "conversation_turns"

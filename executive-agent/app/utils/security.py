@@ -2,8 +2,11 @@
 
 import hashlib
 import re
+from base64 import urlsafe_b64decode, urlsafe_b64encode
 
 from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from app.exceptions import ConfigurationError
 
@@ -63,6 +66,46 @@ def decrypt_text(value: str, key: str) -> str:
         return build_fernet(key).decrypt(value.encode("utf-8")).decode("utf-8")
     except InvalidToken as exc:
         raise ConfigurationError("Stored secret could not be decrypted.") from exc
+
+
+def user_fernet_key(master_key: str, user_id: int) -> str:
+    """Derive a Fernet key for one user from the master key.
+
+    Args:
+        master_key: Process Fernet key.
+        user_id: Account primary key used as HKDF info.
+
+    Returns:
+        Url-safe Fernet key that cannot decrypt another user's secrets.
+    """
+    derived = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"executive-agent-user",
+        info=str(user_id).encode("utf-8"),
+    ).derive(urlsafe_b64decode(master_key.encode("utf-8")))
+    return urlsafe_b64encode(derived).decode("utf-8")
+
+
+def encrypt_for_user(value: str, master_key: str, user_id: int) -> str:
+    """Encrypt a secret with the key derived for one user."""
+    return encrypt_text(value, user_fernet_key(master_key, user_id))
+
+
+def decrypt_for_user(value: str, master_key: str, user_id: int) -> str:
+    """Decrypt a user secret, still accepting ciphertext written with the master key."""
+    if value == "":
+        return ""
+    try:
+        return decrypt_text(value, user_fernet_key(master_key, user_id))
+    except ConfigurationError:
+        return decrypt_text(value, master_key)
+
+
+def hash_user_id(user_id: int) -> str:
+    """Return a short hash of a user id for logs. The raw id is not included."""
+    digest = hashlib.sha256(f"executive-agent:{user_id}".encode()).hexdigest()
+    return digest[:16]
 
 
 def redact(text: str) -> str:

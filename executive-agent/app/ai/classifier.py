@@ -16,16 +16,14 @@ _BODY_LIMIT = 6000
 class EmailClassifier:
     """Produce a validated classification for one message."""
 
-    def __init__(self, gemini: GeminiClient, model: str, *, allow_offline: bool = False) -> None:
-        """Store the model client and the fast model name.
+    def __init__(self, gemini: GeminiClient, *, allow_offline: bool = False) -> None:
+        """Store the model client.
 
         Args:
-            gemini: Shared Gemini wrapper.
-            model: Fast model used for classification.
+            gemini: Shared Gemini wrapper. The model chain lives on the client.
             allow_offline: When demo mode has no API key, use keyword classification.
         """
         self._gemini = gemini
-        self._model = model
         self._allow_offline = allow_offline
 
     async def classify(
@@ -64,13 +62,12 @@ class EmailClassifier:
             ]
         )
         payload = await self._gemini.generate_json(
-            model=self._model,
             system_prompt=load_prompt("classify_email"),
             user_prompt=user_prompt,
             schema=EmailClassification,
         )
-        logger.info("email_classified", model=self._model)
-        return EmailClassification.model_validate(payload), self._model
+        logger.info("email_classified", model=self._gemini.last_model)
+        return EmailClassification.model_validate(payload), self._gemini.last_model
 
 
 def _offline(subject: str, body: str) -> EmailClassification:

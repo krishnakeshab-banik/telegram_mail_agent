@@ -7,10 +7,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.constants import ReminderStatus
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class Reminder(Base):
+class Reminder(OwnedMixin, Base):
     """A future Telegram ping for a task, deadline, or meeting."""
 
     __tablename__ = "reminders"

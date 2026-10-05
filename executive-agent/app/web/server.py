@@ -2,29 +2,43 @@
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from app.utils.activity_log import get_activity_log
 
+OAuthHandler = Callable[[str, str, str], Awaitable[bytes]]
+
 _CONSOLE = Path(__file__).with_name("console.html")
 _LOOPBACK = {"127.0.0.1", "::1"}
 
 
-async def serve_console(port: int) -> asyncio.Server:
-    """Listen for the health check and the local log console.
+async def serve_console(
+    port: int,
+    on_oauth: OAuthHandler | None = None,
+    *,
+    console: bool = False,
+) -> asyncio.Server:
+    """Listen for the health check, the OAuth callback, and an optional log console.
 
     Args:
         port: TCP port.
+        on_oauth: Public Google redirect handler.
+        console: When true, loopback may open the log console.
 
     Returns:
         Running asyncio server.
     """
+    if console:
+        from app.utils.logging import get_logger
+
+        get_logger(__name__).warning("console_enabled", access="loopback")
 
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             raw = await _read_headers(reader)
-            await _dispatch(writer, raw)
+            await _dispatch(writer, raw, on_oauth, console=console)
         except (asyncio.IncompleteReadError, ConnectionError, TimeoutError):
             writer.close()
         try:
@@ -35,7 +49,13 @@ async def serve_console(port: int) -> asyncio.Server:
     return await asyncio.start_server(handle, "0.0.0.0", port)
 
 
-async def _dispatch(writer: asyncio.StreamWriter, raw: bytes) -> None:
+async def _dispatch(
+    writer: asyncio.StreamWriter,
+    raw: bytes,
+    on_oauth: OAuthHandler | None,
+    *,
+    console: bool,
+) -> None:
     method, target = _request_line(raw)
     if method != "GET":
         await _send(writer, 405, b"Method not allowed", "text/plain; charset=utf-8")
@@ -43,6 +63,16 @@ async def _dispatch(writer: asyncio.StreamWriter, raw: bytes) -> None:
     path, query = _split_target(target)
     if path == "/health":
         await _send(writer, 200, b'{"status":"ok"}', "application/json")
+        return
+    if path == "/oauth/google/callback":
+        if on_oauth is None:
+            await _send(writer, 404, b'{"status":"not_found"}', "application/json")
+            return
+        body = await on_oauth(_first(query, "code"), _first(query, "state"), _first(query, "error"))
+        await _send(writer, 200, body, "text/html; charset=utf-8")
+        return
+    if not console:
+        await _send(writer, 404, b'{"status":"not_found"}', "application/json")
         return
     if not _is_loopback(writer):
         await _send(writer, 403, b"Open this console from localhost.", "text/plain; charset=utf-8")

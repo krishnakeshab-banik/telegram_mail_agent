@@ -6,10 +6,11 @@ from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class OpportunityItem(Base):
+class OpportunityItem(OwnedMixin, Base):
     """Fields extracted for an opportunity folder."""
 
     __tablename__ = "opportunity_items"

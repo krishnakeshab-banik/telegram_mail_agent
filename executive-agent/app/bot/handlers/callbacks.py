@@ -4,7 +4,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.bot import formatters, keyboards
-from app.bot.handlers import folders
+from app.bot.handlers import commands, folders
 from app.bot.middleware import callback_parts, container_from, reply_html, require_user_id
 from app.constants import CallbackPrefix
 from app.exceptions import ExecutiveAgentError
@@ -102,7 +102,9 @@ async def _not_important(
 
 
 async def _send(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
-    result = await container_from(context).approvals.approve(int(parts[0]))
+    result = await container_from(context).approvals.approve(
+        int(parts[0]), telegram_user_id=require_user_id(update)
+    )
     await reply_html(update, formatters.plain(result))
 
 
@@ -143,7 +145,9 @@ async def _friendly(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: l
 
 
 async def _cancel(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
-    await container_from(context).approvals.reject(int(parts[0]))
+    await container_from(context).approvals.reject(
+        int(parts[0]), telegram_user_id=require_user_id(update)
+    )
     await reply_html(update, formatters.plain("Cancelled. Nothing was sent."))
 
 
@@ -162,7 +166,9 @@ async def _ignore(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: lis
 async def _approve_event(
     update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]
 ) -> None:
-    result = await container_from(context).approvals.approve(int(parts[0]))
+    result = await container_from(context).approvals.approve(
+        int(parts[0]), telegram_user_id=require_user_id(update)
+    )
     await reply_html(update, formatters.plain(result))
 
 
@@ -259,6 +265,107 @@ async def _threshold(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: 
     await reply_html(update, formatters.plain(f"Notify threshold is {value}."))
 
 
+async def _signup_agree(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]
+) -> None:
+    del parts
+    user = update.effective_user
+    chat = update.effective_chat
+    if user is None:
+        return
+    reply = await container_from(context).accounts.agree(
+        user.id, user.username or "", chat.id if chat else None
+    )
+    await commands.send_flow(update, reply)
+
+
+async def _signup_privacy(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]
+) -> None:
+    del parts
+    await commands.send_flow(update, await container_from(context).accounts.privacy_text())
+
+
+async def _signup_google(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]
+) -> None:
+    del parts
+    user = update.effective_user
+    chat = update.effective_chat
+    if user is None:
+        return
+    reply = await container_from(context).accounts.connect_link(user.id, chat.id if chat else None)
+    await commands.send_flow(update, reply)
+
+
+async def _signup_choice(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]
+) -> None:
+    query = update.callback_query
+    prefix = ""
+    if query is not None and query.data:
+        prefix = query.data.split(":", 1)[0]
+    kind = {"tz": "timezone", "qh": "quiet", "rm": "reminders"}.get(prefix, "")
+    if not kind or not parts:
+        return
+    reply = await container_from(context).accounts.choose(require_user_id(update), kind, parts[0])
+    await commands.send_flow(update, reply)
+
+
+async def _signup_disconnect(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]
+) -> None:
+    accounts = container_from(context).accounts
+    if not parts or parts[0] == "ask":
+        reply = await accounts.disconnect_prompt()
+    else:
+        reply = await accounts.disconnect(require_user_id(update), parts[0])
+    await commands.send_flow(update, reply)
+
+
+async def _signup_delete(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]
+) -> None:
+    if parts and parts[0] == "no":
+        await container_from(context).preferences.set_extra("awaiting_delete", "")
+        await reply_html(update, formatters.plain("Account delete cancelled."))
+        return
+    reply = await container_from(context).accounts.delete_prompt()
+    await commands.send_flow(update, reply)
+
+
+async def _how(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
+    del parts
+    reply = await container_from(context).accounts.how_it_works()
+    await commands.send_flow(update, reply)
+
+
+async def _nav(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
+    if not parts:
+        return
+    action = parts[0]
+    if action == "today":
+        await commands.today(update, context)
+    elif action == "important":
+        await commands.important(update, context)
+    elif action == "folders":
+        from app.bot.handlers import folders
+
+        await folders.menu(update, context)
+    elif action == "meet":
+        await commands.meet(update, context)
+    elif action == "settings":
+        await commands.settings(update, context)
+    elif action == "help":
+        await commands.help_command(update, context)
+
+
+async def _settings(update: Update, context: ContextTypes.DEFAULT_TYPE, parts: list[str]) -> None:
+    if not parts:
+        return
+    await commands.settings_action(update, context, parts[0])
+
+
 _HANDLERS = {
     CallbackPrefix.DRAFT.value: _draft,
     CallbackPrefix.SUMMARIZE.value: _summarize,
@@ -296,4 +403,15 @@ _HANDLERS = {
     CallbackPrefix.OTP_REVEAL.value: folders.on_reveal,
     CallbackPrefix.REPLY_VARIANT.value: folders.on_variant,
     CallbackPrefix.QUICK_REPLY.value: folders.on_quick,
+    CallbackPrefix.SIGNUP_AGREE.value: _signup_agree,
+    CallbackPrefix.SIGNUP_PRIVACY.value: _signup_privacy,
+    CallbackPrefix.SIGNUP_GOOGLE.value: _signup_google,
+    CallbackPrefix.SIGNUP_TIMEZONE.value: _signup_choice,
+    CallbackPrefix.SIGNUP_QUIET.value: _signup_choice,
+    CallbackPrefix.SIGNUP_REMINDERS.value: _signup_choice,
+    CallbackPrefix.SIGNUP_DISCONNECT.value: _signup_disconnect,
+    CallbackPrefix.SIGNUP_DELETE.value: _signup_delete,
+    CallbackPrefix.HOW.value: _how,
+    CallbackPrefix.NAV.value: _nav,
+    CallbackPrefix.SETTINGS.value: _settings,
 }

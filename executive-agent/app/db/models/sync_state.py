@@ -2,17 +2,19 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Integer, String, Text
+from sqlalchemy import Boolean, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class SyncState(Base):
+class SyncState(OwnedMixin, Base):
     """Gmail history cursor and the last successful poll."""
 
     __tablename__ = "sync_states"
+    __table_args__ = (UniqueConstraint("user_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     mailbox_email: Mapped[str] = mapped_column(String(320), default="")

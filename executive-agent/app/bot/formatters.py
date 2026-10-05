@@ -27,9 +27,24 @@ def welcome() -> str:
 
 
 def help_text() -> str:
-    """Return every command and what it does."""
+    """Return each menu command once, grouped, plus the aliases."""
     lines = ["<b>Commands</b>", esc(SHORT_DESCRIPTION), ""]
-    lines.extend(f"/{esc(name)} — {esc(blurb)}" for name, blurb in COMMAND_MENU)
+    grouped = {
+        "Today": ("start", "today", "brief", "meet"),
+        "Work": ("deadlines", "tasks", "waiting", "folders"),
+        "Mail": ("mail", "search"),
+        "Account": ("settings", "help"),
+    }
+    blurbs = dict(COMMAND_MENU)
+    for title, names in grouped.items():
+        lines.append(f"<b>{title}</b>")
+        lines.extend(f"/{esc(name)} — {esc(blurbs[name])}" for name in names if name in blurbs)
+        lines.append("")
+    lines.append(
+        "Aliases: /compose is /mail, /followups is /waiting, /categories is /folders, "
+        "/preferences is /settings. /important and /unread open those sections of /brief. "
+        "Folder views such as /jobs are also under /folders."
+    )
     lines.extend(
         [
             "",
@@ -87,6 +102,25 @@ def event_confirmation(title: str, when: str, warning: str) -> str:
     return "\n".join(lines)
 
 
+def today_text(
+    meetings: list[tuple[str, str]], deadlines: list[str], pending: list[str]
+) -> str:
+    """Format today's meetings, with join links, plus deadlines and pending replies."""
+    parts = ["<b>Today</b>", _linked("Meetings", meetings), _section("Deadlines", deadlines)]
+    parts.append(_section("Pending replies", pending))
+    return _clip("\n\n".join(parts))
+
+
+def meetings_text(meetings: list[tuple[str, str]]) -> str:
+    """Format today's meetings and their join links."""
+    return _clip(_linked("Meetings", meetings))
+
+
+def named_section(title: str, rows: list[str]) -> str:
+    """Format one briefing section."""
+    return _clip(_section(title, rows))
+
+
 def digest(item: Digest) -> str:
     """Format a compact briefing. Empty sections are omitted."""
     sections = [f"<b>{esc(item.title)}</b>"]
@@ -97,6 +131,7 @@ def digest(item: Digest) -> str:
         ("Tasks", item.tasks),
         ("Waiting on you", item.waiting_on_you),
         ("Waiting on others", item.waiting_on_others),
+        ("Unread", item.unread),
     ]
     for title, rows in named:
         if rows:
@@ -248,6 +283,18 @@ def plain(text: str) -> str:
 def esc(value: str) -> str:
     """Escape text for Telegram HTML."""
     return html.escape(value, quote=False)
+
+
+def _linked(title: str, rows: list[tuple[str, str]]) -> str:
+    if not rows:
+        return f"<b>{esc(title)}</b>\nNothing yet."
+    lines = []
+    for label, url in rows[:6]:
+        link = ""
+        if url.startswith("http://") or url.startswith("https://"):
+            link = f' <a href="{html.escape(url, quote=True)}">join</a>'
+        lines.append(f"• {esc(label)}{link}")
+    return f"<b>{esc(title)}</b>\n" + "\n".join(lines)
 
 
 def _section(title: str, rows: list[str]) -> str:

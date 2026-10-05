@@ -14,21 +14,21 @@ class TaskRepository(BaseRepository):
 
     async def get(self, task_id: int) -> Task | None:
         """Return one task."""
-        return await self.session.get(Task, task_id)
+        return self.visible(await self.session.get(Task, task_id))
 
     async def add(self, task: Task) -> Task:
         """Insert a task."""
+        self.stamp(task)
         self.session.add(task)
         await self.session.flush()
         return task
 
     async def list_open(self, *, now: datetime) -> list[Task]:
         """Return open tasks whose snooze has elapsed."""
-        statement = (
-            select(Task)
-            .where(Task.status.in_([TaskStatus.OPEN, TaskStatus.SNOOZED]))
-            .order_by(Task.due_at.asc().nulls_last(), Task.id.asc())
-        )
+        statement = self.restrict(
+            select(Task).where(Task.status.in_([TaskStatus.OPEN, TaskStatus.SNOOZED])),
+            Task,
+        ).order_by(Task.due_at.asc().nulls_last(), Task.id.asc())
         rows = list(await self.session.scalars(statement))
         return [
             row for row in rows if row.status == TaskStatus.OPEN or _elapsed(row.snooze_until, now)

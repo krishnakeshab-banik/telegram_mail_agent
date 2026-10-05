@@ -5,6 +5,10 @@ class ExecutiveAgentError(Exception):
     """Base error for expected agent failures."""
 
 
+class UnscopedQueryError(ExecutiveAgentError):
+    """A user-owned query ran without a user id."""
+
+
 class ConfigurationError(ExecutiveAgentError):
     """Required configuration is missing or invalid."""
 
@@ -59,6 +63,15 @@ class CalendarApiError(ExecutiveAgentError):
 
 class GeminiError(ExecutiveAgentError):
     """Gemini failed after retries or returned an unusable response."""
+
+
+class ModelUnavailable(GeminiError):
+    """One model returned 404, 429, or 503. The chain may try the next name."""
+
+    def __init__(self, code: object) -> None:
+        """Store the upstream status code."""
+        super().__init__(f"Gemini model unavailable ({code}).")
+        self.code = code
 
 
 class RateLimitError(ExecutiveAgentError):

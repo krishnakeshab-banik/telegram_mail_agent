@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from app.config import Settings
 from app.db.migrate import upgrade_database
+from app.db.user_context import user_scope
 from app.services.container import Container, build_container
 from cryptography.fernet import Fernet
 
@@ -33,7 +34,10 @@ async def agent(settings: Settings, tmp_path: Path) -> AsyncIterator[Container]:
     """Migrate a temporary database and return a demo container."""
     upgrade_database(settings)
     container = build_container(settings, data_dir=tmp_path)
+    owner = await container.users.ensure_owner()
+    container.owner_id = owner.id
     try:
-        yield container
+        with user_scope(owner.id):
+            yield container
     finally:
         await container.aclose()

@@ -6,10 +6,11 @@ from sqlalchemy import Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class EmailAnalysis(Base):
+class EmailAnalysis(OwnedMixin, Base):
     """Structured understanding of a single message."""
 
     __tablename__ = "email_analyses"

@@ -11,9 +11,15 @@ from app.constants import ApprovalAction, ApprovalStatus
 from app.db.base import session_scope
 from app.db.models.approval import Approval
 from app.db.repositories.approval_repository import ApprovalRepository
-from app.exceptions import ApprovalExpiredError, ApprovalNotFoundError, ApprovalStateError
+from app.db.user_context import peek_user_id
+from app.exceptions import (
+    ApprovalExpiredError,
+    ApprovalNotFoundError,
+    ApprovalStateError,
+    UnscopedQueryError,
+)
 from app.services.audit_service import AuditService
-from app.utils.security import decrypt_text, encrypt_text, payload_hash
+from app.utils.security import decrypt_for_user, encrypt_for_user, payload_hash
 from app.utils.time import utcnow
 
 Executor = Callable[[dict[str, Any]], Awaitable[str]]
@@ -73,12 +79,13 @@ class ApprovalService:
         encoded = json.dumps(payload, sort_keys=True, default=str)
         from datetime import timedelta
 
+        user_id = _required_user_id()
         expires = utcnow() + timedelta(minutes=self._settings.approval_ttl_minutes)
         async with session_scope(self._sessions) as session:
             row = await ApprovalRepository(session).add(
                 Approval(
                     action_type=action.value,
-                    payload_encrypted=encrypt_text(encoded, self._settings.fernet_key),
+                    payload_encrypted=encrypt_for_user(encoded, self._settings.fernet_key, user_id),
                     payload_hash=payload_hash(encoded),
                     summary=summary[:400],
                     status=ApprovalStatus.PENDING,
@@ -99,7 +106,7 @@ class ApprovalService:
         )
         return approval_id
 
-    async def approve(self, approval_id: int) -> str:
+    async def approve(self, approval_id: int, telegram_user_id: int | None = None) -> str:
         """Execute a pending approval exactly once.
 
         Args:
@@ -108,7 +115,7 @@ class ApprovalService:
         Returns:
             Result summary from the executor.
         """
-        action, payload, source_email_id, digest = await self._claim(approval_id)
+        action, payload, source_email_id, digest = await self._claim(approval_id, telegram_user_id)
         executor = self._executors.get(action)
         if executor is None:
             await self._finish(approval_id, ApprovalStatus.FAILED, "No executor is registered.")
@@ -139,8 +146,9 @@ class ApprovalService:
         )
         return result
 
-    async def reject(self, approval_id: int) -> None:
+    async def reject(self, approval_id: int, telegram_user_id: int | None = None) -> None:
         """Cancel a pending approval."""
+        await self._assert_tapper(approval_id, telegram_user_id)
         await self._transition(approval_id, ApprovalStatus.REJECTED, "Cancelled by the owner.")
 
     async def expire_due(self) -> int:
@@ -168,25 +176,35 @@ class ApprovalService:
         """Return the decrypted payload without executing it."""
         async with session_scope(self._sessions) as session:
             row = await self._require(session, approval_id)
-            return _decrypt(row.payload_encrypted, self._settings.fernet_key)
+            return _decrypt(row.payload_encrypted, self._settings.fernet_key, row.user_id)
 
     async def summary(self, approval_id: int) -> str:
         """Return the stored summary."""
         async with session_scope(self._sessions) as session:
             return (await self._require(session, approval_id)).summary
 
-    async def _claim(self, approval_id: int) -> tuple[str, dict[str, Any], int | None, str]:
+    async def _claim(
+        self, approval_id: int, telegram_user_id: int | None
+    ) -> tuple[str, dict[str, Any], int | None, str]:
         async with session_scope(self._sessions) as session:
             row = await self._require(session, approval_id)
+            _check_tapper(row, telegram_user_id)
             self._ensure_pending(row)
             row.status = ApprovalStatus.APPROVED
             row.resolved_at = utcnow()
             return (
                 row.action_type,
-                _decrypt(row.payload_encrypted, self._settings.fernet_key),
+                _decrypt(row.payload_encrypted, self._settings.fernet_key, row.user_id),
                 row.source_email_id,
                 row.payload_hash,
             )
+
+    async def _assert_tapper(self, approval_id: int, telegram_user_id: int | None) -> None:
+        if telegram_user_id is None:
+            return
+        async with session_scope(self._sessions) as session:
+            row = await self._require(session, approval_id)
+            _check_tapper(row, telegram_user_id)
 
     async def _finish(self, approval_id: int, status: str, result: str) -> None:
         async with session_scope(self._sessions) as session:
@@ -230,8 +248,20 @@ class ApprovalService:
             raise ApprovalExpiredError("That approval expired. Ask again to create a new one.")
 
 
-def _decrypt(value: str, key: str) -> dict[str, Any]:
-    parsed = json.loads(decrypt_text(value, key))
+def _decrypt(value: str, key: str, user_id: int) -> dict[str, Any]:
+    parsed = json.loads(decrypt_for_user(value, key, user_id))
     if not isinstance(parsed, dict):
         raise ApprovalStateError("Approval payload is invalid.")
     return parsed
+
+
+def _check_tapper(row: Approval, telegram_user_id: int | None) -> None:
+    if telegram_user_id is not None and row.telegram_user_id != telegram_user_id:
+        raise ApprovalNotFoundError("That approval no longer exists.")
+
+
+def _required_user_id() -> int:
+    user_id = peek_user_id()
+    if user_id is None:
+        raise UnscopedQueryError("A user id is required to store an approval.")
+    return user_id

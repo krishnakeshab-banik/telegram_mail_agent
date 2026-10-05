@@ -1,30 +1,53 @@
 """Scheduled jobs. Each job calls services and formats the result."""
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
+from functools import wraps
 
 from app.bot import formatters, keyboards
 from app.db.base import session_scope
 from app.db.repositories.email_repository import EmailRepository
 from app.db.repositories.state_repository import SyncStateRepository
+from app.db.user_context import user_scope
 from app.exceptions import AuthExpiredError, ExecutiveAgentError
 from app.services.container import Container
 from app.utils.logging import get_logger
+from app.utils.security import hash_user_id
 from app.utils.time import to_local, utcnow
 
 logger = get_logger(__name__)
 _RECENT_NOTICES: dict[str, datetime] = {}
+Job = Callable[[Container], Awaitable[None]]
 
 
+def for_owner(job: Job) -> Job:
+    """Run a scheduled job inside the original owner's mailbox scope."""
+
+    @wraps(job)
+    async def wrapped(container: Container) -> None:
+        if container.owner_id < 1:
+            owner = await container.users.ensure_owner()
+            container.owner_id = owner.id
+        with user_scope(container.owner_id):
+            await job(container)
+
+    return wrapped
+
+
+@for_owner
 async def poll_inbox(container: Container) -> None:
     """Sync mail, classify it, and deliver any alerts that are due."""
+    account = await container.users.get(container.owner_id)
+    if account is None or account.status != "active":
+        return
     if await container.preferences.is_paused():
         return
     try:
         inserted = await container.sync.sync_inbox()
-        await container.signups.sync_connected()
         processed = await container.pipeline.process_pending()
         await container.folders.organize(processed)
         await container.otp.purge_expired()
+        await container.accounts.purge_old_bodies()
         for email_id in processed:
             await container.attachments.process_email(email_id)
         await deliver_alerts(container)
@@ -32,14 +55,14 @@ async def poll_inbox(container: Container) -> None:
         await _report_gemini(container)
     except AuthExpiredError as exc:
         await container.audit.record_failure("sync", exc)
-        await _notify_once(
-            container,
-            "auth",
-            "Google authorization expired. Send /signup and approve access in the browser.",
-        )
+        await container.accounts.pause_sync()
     except ExecutiveAgentError as exc:
         await container.audit.record_failure("sync", exc)
-        logger.warning("sync_failed", error_type=type(exc).__name__)
+        logger.warning(
+            "sync_failed",
+            error_type=type(exc).__name__,
+            user=hash_user_id(container.owner_id),
+        )
         await _notify_once(container, f"sync:{type(exc).__name__}", f"Sync failed: {exc}")
 
 
@@ -67,6 +90,7 @@ async def deliver_alerts(container: Container) -> None:
             await container.audit.record_failure("notify", exc)
 
 
+@for_owner
 async def dispatch_reminders(container: Container) -> None:
     """Send due reminders."""
     if await container.preferences.is_paused():
@@ -86,6 +110,7 @@ async def dispatch_reminders(container: Container) -> None:
             await container.audit.record_failure("reminder", exc)
 
 
+@for_owner
 async def nudge_followups(container: Container) -> None:
     """Nudge the owner about open follow-ups."""
     if await container.preferences.is_paused():
@@ -105,6 +130,7 @@ async def nudge_followups(container: Container) -> None:
             await container.audit.record_failure("followup", exc)
 
 
+@for_owner
 async def send_digests(container: Container) -> None:
     """Send the morning briefing and evening wrap-up once per local day."""
     if await container.preferences.is_paused():
@@ -127,6 +153,7 @@ async def send_digests(container: Container) -> None:
             )
 
 
+@for_owner
 async def expire_approvals(container: Container) -> None:
     """Expire confirmations that the owner did not answer in time."""
     await container.approvals.expire_due()

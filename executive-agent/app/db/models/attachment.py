@@ -6,10 +6,11 @@ from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class Attachment(Base):
+class Attachment(OwnedMixin, Base):
     """File attached to an email, summarized when the type is allowed."""
 
     __tablename__ = "attachments"

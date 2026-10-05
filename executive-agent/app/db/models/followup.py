@@ -7,10 +7,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.constants import FollowUpDirection, FollowUpStatus
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class FollowUp(Base):
+class FollowUp(OwnedMixin, Base):
     """Open loop tracked until it is answered, dismissed, or snoozed."""
 
     __tablename__ = "followups"

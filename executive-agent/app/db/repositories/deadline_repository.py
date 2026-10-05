@@ -14,41 +14,43 @@ class DeadlineRepository(BaseRepository):
 
     async def get(self, deadline_id: int) -> Deadline | None:
         """Return one deadline."""
-        return await self.session.get(Deadline, deadline_id)
+        return self.visible(await self.session.get(Deadline, deadline_id))
 
     async def add(self, deadline: Deadline) -> Deadline:
         """Insert a deadline."""
+        self.stamp(deadline)
         self.session.add(deadline)
         await self.session.flush()
         return deadline
 
     async def list_open_until(self, moment: datetime) -> list[Deadline]:
         """Return open deadlines due at or before a moment."""
-        statement = (
-            select(Deadline)
-            .where(
+        statement = self.restrict(
+            select(Deadline).where(
                 Deadline.status == TaskStatus.OPEN,
                 Deadline.due_at.is_not(None),
                 Deadline.due_at <= moment,
-            )
-            .order_by(Deadline.due_at.asc())
-        )
+            ),
+            Deadline,
+        ).order_by(Deadline.due_at.asc())
         return list(await self.session.scalars(statement))
 
     async def earliest_for_email(self, email_id: int) -> Deadline | None:
         """Return the soonest dated deadline on one email."""
-        statement = (
+        statement = self.restrict(
             select(Deadline)
             .where(Deadline.email_id == email_id, Deadline.due_at.is_not(None))
-            .order_by(Deadline.due_at.asc())
+            .order_by(Deadline.due_at.asc()),
+            Deadline,
         )
         return await self.session.scalar(statement)
 
     async def list_open(self) -> list[Deadline]:
         """Return every unfinished deadline."""
-        statement = (
+        statement = self.restrict(
             select(Deadline)
             .where(Deadline.status.in_([TaskStatus.OPEN, TaskStatus.SNOOZED]))
-            .order_by(Deadline.due_at.asc().nulls_last())
+            .order_by(Deadline.due_at.asc().nulls_last()),
+            Deadline,
         )
         return list(await self.session.scalars(statement))

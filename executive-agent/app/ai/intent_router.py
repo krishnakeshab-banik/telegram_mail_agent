@@ -24,16 +24,14 @@ _DEMO_RULES: tuple[tuple[tuple[str, ...], IntentName], ...] = (
 class IntentRouter:
     """Interpret owner messages. This is the only path that can request actions."""
 
-    def __init__(self, gemini: GeminiClient, model: str, *, allow_local_fallback: bool) -> None:
-        """Store the fast model and whether demo mode may skip the network.
+    def __init__(self, gemini: GeminiClient, *, allow_local_fallback: bool) -> None:
+        """Store the client and whether demo mode may skip the network.
 
         Args:
-            gemini: Shared Gemini wrapper.
-            model: Fast model name.
+            gemini: Shared Gemini wrapper. The model chain lives on the client.
             allow_local_fallback: Use keyword routing when no API key is configured.
         """
         self._gemini = gemini
-        self._model = model
         self._allow_local_fallback = allow_local_fallback
 
     async def route(self, text: str, history: list[tuple[str, str]]) -> IntentSchema:
@@ -58,7 +56,6 @@ class IntentRouter:
             ]
         )
         payload = await self._gemini.generate_json(
-            model=self._model,
             system_prompt=load_prompt("intent_router"),
             user_prompt=user_prompt,
             schema=IntentSchema,

@@ -6,8 +6,11 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.bot import formatters, keyboards
+from app.bot.keyboards.signup import markup
 from app.bot.middleware import container_from, reply_html, require_user_id
+from app.constants import CallbackPrefix, callback_data
 from app.exceptions import ExecutiveAgentError, RecordNotFoundError
+from app.services.account_service import FlowButton, FlowReply
 from app.utils.logging import get_logger
 from app.utils.security import redact
 from app.utils.time import format_local, to_local, utcnow
@@ -16,31 +19,48 @@ logger = get_logger(__name__)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Register the chat and explain the agent."""
-    await reply_html(update, formatters.welcome())
+    """Show the intro, or the next signup step for this person."""
+    user = update.effective_user
+    chat = update.effective_chat
+    if user is None:
+        return
+    reply = await container_from(context).accounts.present(user.id, chat.id if chat else None)
+    await send_flow(update, reply)
 
 
 async def signup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Connect the sender's Google account. The browser opens on this computer."""
+    """Send a one-time Google connect link."""
+    user = update.effective_user
     chat = update.effective_chat
-    if chat is None:
+    if user is None:
         return
-    await reply_html(
-        update,
-        formatters.plain(
-            "Opening Google sign-in on the computer running this agent. "
-            "Choose the Gmail account to sync."
-        ),
-    )
-    try:
-        email = await container_from(context).signups.connect(require_user_id(update), chat.id)
-    except ExecutiveAgentError as exc:
-        await reply_html(update, formatters.plain(str(exc)))
+    reply = await container_from(context).accounts.connect_link(user.id, chat.id if chat else None)
+    await send_flow(update, reply)
+
+
+async def privacy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show what is stored and for how long."""
+    reply = await container_from(context).accounts.privacy_text()
+    await send_flow(update, reply)
+
+
+async def disconnect(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ask whether to keep data after revoking Google."""
+    reply = await container_from(context).accounts.disconnect_prompt()
+    await send_flow(update, reply)
+
+
+async def delete_me(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ask for confirmation before erasing the account."""
+    reply = await container_from(context).accounts.delete_prompt()
+    await send_flow(update, reply)
+
+
+async def send_flow(update: Update, reply: FlowReply) -> None:
+    """Send one signup reply. An empty reply is silence."""
+    if not reply.text:
         return
-    await reply_html(
-        update,
-        formatters.plain(f"Connected {email}. I will pull the last 7 days on the next sync."),
-    )
+    await reply_html(update, formatters.plain(reply.text), markup(reply.buttons))
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -62,15 +82,27 @@ async def wrapup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def important(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List important mail."""
-    lines = await container_from(context).inbox.important_lines()
-    await reply_html(update, formatters.bullet_list("Important", lines))
+    """Open the Important section of the briefing."""
+    lines = await container_from(context).briefing.important_lines()
+    await reply_html(update, formatters.named_section("Important", lines))
 
 
 async def unread(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List unread mail."""
-    lines = await container_from(context).inbox.unread_lines()
-    await reply_html(update, formatters.bullet_list("Unread", lines))
+    """Open the Unread section of the briefing."""
+    lines = await container_from(context).briefing.unread_lines()
+    await reply_html(update, formatters.named_section("Unread", lines))
+
+
+async def today(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show today's meetings, deadlines due within 24 hours, and pending replies."""
+    meetings, deadlines, pending = await container_from(context).briefing.today_lines()
+    await reply_html(update, formatters.today_text(meetings, deadlines, pending))
+
+
+async def meet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show today's meetings and join links."""
+    meetings, _deadlines, _pending = await container_from(context).briefing.today_lines()
+    await reply_html(update, formatters.meetings_text(meetings))
 
 
 async def tasks(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -94,13 +126,16 @@ async def deadlines(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await reply_html(update, formatters.bullet_list("Deadlines", lines))
 
 
-async def followups(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List pending follow-ups."""
-    rows = await container_from(context).followups.list_open()
-    lines = [
-        f"f{item.id} {item.direction}: {item.subject or item.counterpart_email}" for item in rows
-    ]
-    await reply_html(update, formatters.bullet_list("Follow-ups", lines))
+async def waiting(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show replies owed and replies still outstanding."""
+    owed, others = await container_from(context).briefing.waiting_lines()
+    text = "\n\n".join(
+        [
+            formatters.named_section("Waiting on you", owed),
+            formatters.named_section("Waiting on others", others),
+        ]
+    )
+    await reply_html(update, text)
 
 
 async def calendar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -286,20 +321,116 @@ async def history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await reply_html(update, formatters.history(entries))
 
 
-async def preferences(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show preferences and the edit buttons."""
+async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Open the settings menu."""
+    del context
+    await send_flow(update, _settings_menu())
+
+
+async def settings_action(update: Update, context: ContextTypes.DEFAULT_TYPE, action: str) -> None:
+    """Open one settings screen."""
     services = container_from(context)
+    if action == "folds":
+        from app.bot.handlers import folders
+
+        await folders.menu(update, context)
+        return
+    if action == "ints":
+        await interests(update, context)
+        return
+    if action == "acct":
+        await send_flow(update, await _account_screen(context))
+        return
+    if action == "over":
+        prefs = await services.preferences.get()
+        await services.preferences.set_reminders_override(not prefs.reminders_override_quiet)
     prefs = await services.preferences.get()
-    text = formatters.preferences(
-        prefs, await services.contacts.list_vips(), await services.contacts.list_muted()
+    if action in {"rem", "over"}:
+        state = "ON" if prefs.reminders_override_quiet else "OFF"
+        await send_flow(
+            update,
+            FlowReply(
+                f"Reminders fire {prefs.reminder_leads} minutes ahead. "
+                f"Reminders override quiet hours: {state}.",
+                (
+                    (
+                        FlowButton(
+                            "Toggle quiet-hours override",
+                            callback_data(CallbackPrefix.SETTINGS, "over"),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        return
+    if action == "quiet":
+        await reply_html(
+            update,
+            formatters.plain(
+                f"Quiet hours are {prefs.quiet_start}–{prefs.quiet_end}. "
+                "Ordinary mail respects them. Critical alerts and phishing still arrive. "
+                "Change them with quiet 22:00-07:00."
+            ),
+        )
+        return
+    if action == "zone":
+        await reply_html(
+            update,
+            formatters.plain(f"Timezone is {prefs.timezone}. Change it with timezone Asia/Kolkata."),
+        )
+        return
+    if action == "notes":
+        enabled = [name for name, on in prefs.category_notify.items() if on]
+        await reply_html(
+            update,
+            formatters.plain("Notifications are on for: " + ", ".join(enabled)),
+        )
+
+
+def _settings_menu() -> FlowReply:
+    return FlowReply(
+        "Settings",
+        (
+            (
+                FlowButton("Reminders", callback_data(CallbackPrefix.SETTINGS, "rem")),
+                FlowButton("Quiet hours", callback_data(CallbackPrefix.SETTINGS, "quiet")),
+            ),
+            (
+                FlowButton("Timezone", callback_data(CallbackPrefix.SETTINGS, "zone")),
+                FlowButton("Notifications", callback_data(CallbackPrefix.SETTINGS, "notes")),
+            ),
+            (
+                FlowButton("Folders", callback_data(CallbackPrefix.SETTINGS, "folds")),
+                FlowButton("Interests", callback_data(CallbackPrefix.SETTINGS, "ints")),
+            ),
+            (FlowButton("Account", callback_data(CallbackPrefix.SETTINGS, "acct")),),
+        ),
     )
-    await reply_html(update, text, keyboards.preference_actions())
 
 
-async def categories(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show category counts."""
-    counts = await container_from(context).inbox.category_counts()
-    await reply_html(update, formatters.categories(counts))
+async def _account_screen(context: ContextTypes.DEFAULT_TYPE) -> FlowReply:
+    del context
+    return FlowReply(
+        "Account. Disconnect stops sync. Delete asks you to type DELETE.",
+        (
+            (
+                FlowButton("Disconnect", callback_data(CallbackPrefix.SIGNUP_DISCONNECT, "ask")),
+                FlowButton("Delete my data", callback_data(CallbackPrefix.SIGNUP_DELETE, "ask")),
+            ),
+        ),
+    )
+
+
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Hidden admin entry. The admin tools themselves are not in this step."""
+    del context
+    user = update.effective_user
+    if user is None:
+        return
+    await reply_html(
+        update,
+        formatters.plain("Admin commands are hidden and are not available yet."),
+    )
 
 
 async def pause(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

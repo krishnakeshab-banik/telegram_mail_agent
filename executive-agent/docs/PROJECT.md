@@ -2,7 +2,7 @@
 
 A Telegram bot that watches one Gmail account, files mail into local folders, drafts replies and new emails, and keeps deadlines, tasks, meetings, and follow-ups in one place. Telegram is the only interface. Gmail and Calendar change only after an explicit approval.
 
-This document describes the project as it stands on 5 October 2026: what it is for, how it is built, which functions work, and what is still open.
+The guide for a person using the bot — problem, solution, features, the path from `/start` through a confirmed send, and architecture — is [README.md](../README.md). History is in [CHANGELOG.md](../CHANGELOG.md). Install steps are in [SETUP.md](../SETUP.md).
 
 ## Purpose
 
@@ -19,9 +19,9 @@ The agent:
 
 ## Current status
 
-The live bot is running against the owner's Gmail account. Google authorization is stored. Startup checks Gmail, Calendar, and Gemini. The last local verification was **38 tests passed**, with ruff and mypy clean (129 source files). Alembic is at revision `0003_folders`. The Telegram profile lists **48 commands**.
+Each Telegram user connects one Google mailbox from `/start`. The Telegram menu lists **12 commands**. Older commands stay as hidden aliases. Alembic head is `0006_user_uniques`. The database upgrades when the process starts.
 
-Gemini `gemini-3.8-flash` is the preferred model. When the API returns a quota or availability error, the client tries `gemini-3.5-flash`, then `gemini-flash-latest`, then `gemini-3.1-flash-lite`. A 429 on startup has been observed; the fallback then passed.
+Model names come from `GEMINI_MODEL_CHAIN` in the environment. The client tries them in order on 429, 503, or 404. The latest local check is in [verification_report.md](verification_report.md).
 
 | Area | State |
 | --- | --- |
@@ -33,33 +33,11 @@ Gemini `gemini-3.8-flash` is the preferred model. When the API returns a quota o
 | Virtual folders, OTP vault, spam, opportunities | Working in the bot and covered by tests |
 | Reply variants, templates, focus mode, custom folders | Working |
 | Compose a new email from an address and a note | Working |
-| Topics mode, voice notes, Sunday review, scheduled send, meeting prep | Not built |
+| Voice notes, Sunday review, scheduled send, meeting prep | Not built |
 
 ## Progress
 
-### Phase 1–9: the original agent
-
-Completed and kept in place.
-
-- Configuration, SQLite, Alembic, Telegram skeleton, Google OAuth.
-- Incremental Gmail sync, MIME parsing, classification, Telegram alerts.
-- Draft, edit, and send through an approval gate, with an audit log.
-- Meeting detection, conflict warning, Calendar create after approval.
-- Tasks, reminders, morning briefing, evening wrap-up, follow-ups.
-- Attachments, thread summaries, categories, optional Gmail labels.
-- Natural-language search and an intent router.
-- Contacts, VIP, mute, tone, quiet hours, writing-style notes.
-- Security tests, demo mode, Docker, and the operations console.
-
-### Live repairs
-
-Completed after the first run against a real inbox.
-
-- The empty briefing came from a history cursor that skipped existing mail, and from a formatter that printed "None" for empty sections. Sync now backfills the last 7 days once, then continues with history. The briefing skips empty sections.
-- Gemini model names that returned 404 were replaced. Failures include the status code and are reported in Telegram at most once every 10 minutes. `/errors` lists recent failures.
-- `/signup` lets an account connect. The browser opens on the computer that runs the bot.
-- Deadlines are resolved from the email's received time. A two-day-old "deadline today" is overdue, never "hours left".
-- Newsletter phrases such as "unsubscribe" are not stored as tasks.
+Moved to [CHANGELOG.md](CHANGELOG.md).
 
 ### Folder assistant
 
@@ -88,14 +66,13 @@ Completed.
 
 These were in the folder-assistant plan and are not implemented.
 
-- Telegram topics mode (one topic per folder).
 - Resume upload to seed the interest profile, and learning a written explanation from Interested / Not for me.
 - Deduplicating the same opportunity across mailing lists.
 - Three suggested free calendar slots inside a meeting reply.
-- Schedule send, a 30-second undo for text the owner typed themselves, and translate.
+- Schedule send, and a 30-second undo for text the owner typed themselves.
 - Neglected-reply nudges at 4 hours, 24 hours, and 48 hours with a draft attached. A single follow-up nudge interval exists today.
 - Meeting prep alerts at 24 hours, 1 hour, and 10 minutes.
-- A recommended daily plan built from free calendar gaps, a Sunday weekly review, and an inbox-health score.
+- A recommended daily plan built from free calendar gaps, and a Sunday weekly review.
 - Voice notes and forwarded screenshots or PDFs.
 - Editable per-folder notify settings in `/preferences`. Notify mode is stored on each folder (instant, digest, or mute) but is not a separate settings screen.
 
@@ -131,7 +108,7 @@ Email text is wrapped as untrusted data before a model call. Instructions inside
 | Function | How |
 | --- | --- |
 | Open the bot | `/start` |
-| Connect Google | `/signup`. The consent screen opens on the host computer. |
+| Connect Google | `/start`, then Privacy note, I agree, and Connect Google. Google redirects to `{PUBLIC_BASE_URL}/oauth/google/callback`. |
 | Command reference | `/help` |
 | Health | `/status` shows mode, whether Google is linked, sync, and the last Gemini result. |
 | Recent failures | `/errors` |
@@ -238,14 +215,14 @@ An OTP or verification mail does not produce an alert. `/otps` shows the sender,
 
 ### Operations console
 
-`GET /health` on port 8081 is open. The log console at `http://127.0.0.1:8081/` is loopback only. Logs are redacted: message bodies and tokens are not written.
+`GET /health` on port 8081 is open and returns no mailbox data. The log console at `http://127.0.0.1:8081/` stays off unless `CONSOLE_ENABLED=true`. When it is on, only this computer can open it. Logs are redacted: message bodies and tokens are not written.
 
 ## Safety
 
 - Send, calendar create, calendar update, calendar delete, and label apply go through `ApprovalService`. The payload is Fernet-encrypted. The audit log stores a hash and a short summary, not the body.
 - An approval that expires cannot be executed.
 - OAuth tokens are encrypted. They are not logged.
-- The bot answers the allowlisted Telegram user. `/start`, `/help`, and `/signup` are available so someone can connect; other commands require the allowlist or a signed-up member.
+- A person without an account can open `/start`, read the privacy note, and connect Google. After that, commands run as that user. Banned accounts are ignored.
 - Quiet hours hold non-critical alerts. Focus mode holds ordinary alerts.
 - Demo mode (`APP_MODE=demo`) reads fixtures and writes sends to `data/demo_outbox.jsonl`. It does not contact Gmail.
 
@@ -265,7 +242,7 @@ flowchart TD
 
 Stack: Python 3.11, python-telegram-bot v21, Google OAuth, Gemini structured JSON, SQLAlchemy 2, Alembic, APScheduler, pydantic-settings, Fernet, structlog.
 
-Main tables: `emails`, `email_analyses`, `tasks`, `deadlines`, `calendar_events`, `followups`, `approvals`, `audit_logs`, `oauth_tokens`, `contacts`, `preferences`, `members`, `folders`, `email_folder_links`, `opportunity_items`, `otp_entries`, `reply_templates`.
+Main tables: `users`, `emails`, `email_analyses`, `tasks`, `deadlines`, `calendar_events`, `followups`, `approvals`, `audit_logs`, `oauth_tokens`, `contacts`, `preferences`, `folders`, `email_folder_links`, `opportunity_items`, `otp_entries`, `reply_templates`.
 
 Migrations:
 
@@ -274,6 +251,9 @@ Migrations:
 | `0001_initial` | The original schema |
 | `0002_signup` | Members, backfill flag, last Gemini error |
 | `0003_folders` | Folders, links, opportunities, OTP rows, reply templates |
+| `0004_users` | `users`, and `user_id` on owned tables |
+| `0005_oauth_state` | One-time OAuth state rows |
+| `0006_user_uniques` | Per-user unique keys, drop `members`, reminders-override-quiet-hours flag |
 
 A closer file map is in [architecture.md](architecture.md). OAuth scopes are in [scopes.md](scopes.md). Folder commands are in [folders.md](folders.md). The test log is in [verification_report.md](verification_report.md).
 
@@ -320,13 +300,6 @@ Docker: `docker compose up --build`.
 
 ## Verification snapshot
 
-Checked on this machine on 5 October 2026.
-
-- `pytest`: 38 passed.
-- `ruff check app tests`: clean.
-- `mypy app`: clean, 129 files.
-- Live startup: Gemini pass after a quota fallback, Gmail pass, Calendar pass, 48 commands published to Telegram.
-
-Covered by tests: parsing, quiet hours, token encryption, untrusted wrapping, sync dedupe, reply and new mail not sent before approval, expired approval cannot send, calendar create only after approval, prompt injection does not send, folder counts, overdue deadlines, OTP masking, job status, custom folders, focus mode, and the command catalog length limits.
+The latest recorded check is the multi-user section of [verification_report.md](verification_report.md): 56 tests passed, ruff clean, mypy clean (138 files), menu of 12 commands, and per-user deletion after the word DELETE.
 
 Not exercised as a live tap in that session: Reveal deleting a Telegram message on a phone, a real phishing sample in `/spam`, and a real Send to an outside recipient.

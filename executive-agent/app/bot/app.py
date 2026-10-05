@@ -13,6 +13,7 @@ from telegram.ext import (
     filters,
 )
 
+from app.bot.catalog import COMMANDS
 from app.bot.handlers import callbacks, commands, folders, messages
 from app.bot.middleware import guarded
 from app.services.container import Container
@@ -27,56 +28,49 @@ def _open(
     return _handler
 
 
-_COMMANDS = {
-    "start": commands.start,
-    "signup": commands.signup,
-    "help": commands.help_command,
-    "brief": commands.brief,
-    "wrapup": commands.wrapup,
-    "important": commands.important,
-    "unread": commands.unread,
-    "tasks": commands.tasks,
-    "deadlines": commands.deadlines,
-    "followups": commands.followups,
-    "calendar": commands.calendar,
-    "search": commands.search,
-    "suggest": commands.suggest,
-    "mail": commands.mail,
-    "compose": commands.mail,
-    "history": commands.history,
-    "preferences": commands.preferences,
-    "categories": commands.categories,
-    "pause": commands.pause,
-    "resume": commands.resume,
-    "status": commands.status,
-    "errors": commands.errors,
-    "folders": folders.menu,
-    "menu": folders.menu,
-    "meets": _open("meets"),
-    "jobs": _open("jobs"),
-    "hackathons": _open("hackathons"),
-    "otps": _open("otps"),
-    "spam": _open("spam"),
-    "waiting": _open("waiting"),
-    "newsletters": _open("newsletters"),
-    "events": _open("events"),
-    "scholarships": _open("scholarships"),
-    "opportunities": _open("opportunities"),
-    "bills": _open("bills"),
-    "orders": _open("orders"),
-    "travel": _open("travel"),
-    "finance": _open("finance"),
-    "academics": _open("academics"),
-    "filtered": _open("filtered"),
-    "vip": _open("vip"),
-    "saved": _open("saved"),
-    "archive": _open("archive"),
-    "focus": commands.focus,
-    "templates": commands.templates,
-    "interests": commands.interests,
-    "done": commands.done,
-    "snooze": commands.snooze,
-}
+def _handlers() -> dict[str, Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]]]:
+    return {
+        "start": commands.start,
+        "signup": commands.signup,
+        "help": commands.help_command,
+        "brief": commands.brief,
+        "wrapup": commands.wrapup,
+        "important": commands.important,
+        "unread": commands.unread,
+        "tasks": commands.tasks,
+        "deadlines": commands.deadlines,
+        "waiting": commands.waiting,
+        "calendar": commands.calendar,
+        "search": commands.search,
+        "suggest": commands.suggest,
+        "mail": commands.mail,
+        "history": commands.history,
+        "settings": commands.settings,
+        "pause": commands.pause,
+        "resume": commands.resume,
+        "status": commands.status,
+        "errors": commands.errors,
+        "folders": folders.menu,
+        "focus": commands.focus,
+        "templates": commands.templates,
+        "interests": commands.interests,
+        "done": commands.done,
+        "snooze": commands.snooze,
+        "today": commands.today,
+        "meet": commands.meet,
+        "privacy": commands.privacy,
+        "disconnect": commands.disconnect,
+        "deleteme": commands.delete_me,
+        "admin": commands.admin,
+    }
+
+
+def _handler_for(
+    key: str,
+) -> Callable[[Update, ContextTypes.DEFAULT_TYPE], Coroutine[Any, Any, None]]:
+    if key.startswith("folder:"):
+        return _open(key.split(":", 1)[1])
+    return _handlers()[key]
 
 
 def build_application(container: Container) -> Application[Any, Any, Any, Any, Any, Any]:
@@ -91,8 +85,8 @@ def build_application(container: Container) -> Application[Any, Any, Any, Any, A
     token = container.settings.telegram_bot_token or "0:check"
     application = Application.builder().token(token).build()
     application.bot_data["container"] = container
-    for name, handler in _COMMANDS.items():
-        application.add_handler(CommandHandler(name, guarded(handler)))
+    for spec in COMMANDS:
+        application.add_handler(CommandHandler(spec.name, guarded(_handler_for(spec.handler))))
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, guarded(messages.on_text))
     )

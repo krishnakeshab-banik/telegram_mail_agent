@@ -10,9 +10,10 @@ from app.constants import GOOGLE_SCOPES
 from app.db.base import session_scope
 from app.db.models.oauth_token import OAuthToken
 from app.db.repositories.state_repository import OAuthRepository
-from app.exceptions import AuthExpiredError, ConfigurationError
+from app.db.user_context import peek_user_id
+from app.exceptions import AuthExpiredError, ConfigurationError, UnscopedQueryError
 from app.utils.logging import get_logger
-from app.utils.security import decrypt_text, encrypt_text
+from app.utils.security import decrypt_for_user, encrypt_for_user
 from app.utils.time import utcnow
 
 logger = get_logger(__name__)
@@ -67,8 +68,9 @@ class GoogleAuth:
             expiry: Access-token expiry, if known.
             account_email: Mailbox address the token belongs to.
         """
-        encrypted_access = encrypt_text(access_token, self._settings.fernet_key)
-        encrypted_refresh = encrypt_text(refresh_token, self._settings.fernet_key)
+        user_id = _required_user_id()
+        encrypted_access = encrypt_for_user(access_token, self._settings.fernet_key, user_id)
+        encrypted_refresh = encrypt_for_user(refresh_token, self._settings.fernet_key, user_id)
         async with session_scope(self._sessions) as session:
             repo = OAuthRepository(session)
             existing = await repo.get_google()
@@ -97,8 +99,12 @@ class GoogleAuth:
             row = await OAuthRepository(session).get_google()
             if row is None or not row.encrypted_refresh_token:
                 raise AuthExpiredError("Google is not authorized. Run scripts/authorize_google.py.")
-            access = decrypt_text(row.encrypted_access_token, self._settings.fernet_key)
-            refresh = decrypt_text(row.encrypted_refresh_token, self._settings.fernet_key)
+            access = decrypt_for_user(
+                row.encrypted_access_token, self._settings.fernet_key, row.user_id
+            )
+            refresh = decrypt_for_user(
+                row.encrypted_refresh_token, self._settings.fernet_key, row.user_id
+            )
             expiry = row.expiry
         if access and expiry and expiry - _REFRESH_SKEW > utcnow():
             return access
@@ -157,3 +163,10 @@ class GoogleAuth:
         if not credentials.token:
             raise AuthExpiredError("Google token refresh returned no access token.")
         return credentials.token, expiry
+
+
+def _required_user_id() -> int:
+    user_id = peek_user_id()
+    if user_id is None:
+        raise UnscopedQueryError("A user id is required to store Google tokens.")
+    return user_id

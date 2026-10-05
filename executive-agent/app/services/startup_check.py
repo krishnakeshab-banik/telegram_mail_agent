@@ -50,12 +50,13 @@ async def _gemini(container: Container) -> str:
     if container.settings.app_mode == "demo" or not container.gemini.enabled:
         return "skipped in demo or without a key"
     await container.gemini.generate_json(
-        model=container.settings.gemini_model_fast,
         system_prompt="Return JSON only.",
         user_prompt="Set ok to true.",
         schema=_Ping,
     )
-    return container.settings.gemini_model_fast
+    answered = container.gemini.last_model
+    logger.info("startup_gemini", model=answered)
+    return answered
 
 
 async def _gmail(container: Container) -> str:

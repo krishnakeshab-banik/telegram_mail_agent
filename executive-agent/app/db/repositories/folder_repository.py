@@ -15,57 +15,68 @@ class FolderRepository(BaseRepository):
 
     async def get_by_slug(self, slug: str) -> Folder | None:
         """Return one folder."""
-        statement = select(Folder).where(Folder.slug == slug)
+        statement = self.restrict(select(Folder).where(Folder.slug == slug), Folder)
         return await self.session.scalar(statement)
 
     async def list_all(self) -> list[Folder]:
         """Return every folder, built-ins first."""
-        statement = select(Folder).order_by(Folder.is_custom, Folder.title)
+        statement = self.restrict(select(Folder).order_by(Folder.is_custom, Folder.title), Folder)
         return list(await self.session.scalars(statement))
 
     async def add(self, folder: Folder) -> Folder:
         """Insert a folder."""
+        self.stamp(folder)
         self.session.add(folder)
         await self.session.flush()
         return folder
 
     async def counts(self) -> dict[str, int]:
         """Count active links per folder slug."""
-        statement = (
+        statement = self.restrict(
             select(Folder.slug, func.count(EmailFolderLink.id))
             .join(EmailFolderLink, EmailFolderLink.folder_id == Folder.id)
             .where(EmailFolderLink.status != "archived")
-            .group_by(Folder.slug)
+            .group_by(Folder.slug),
+            Folder,
+            EmailFolderLink,
         )
         rows = (await self.session.execute(statement)).all()
         return {str(slug): int(count) for slug, count in rows}
 
     async def link(self, email_id: int, folder_id: int, *, primary: bool, status: str) -> None:
         """Attach an email to a folder once."""
-        statement = select(EmailFolderLink).where(
-            EmailFolderLink.email_id == email_id,
-            EmailFolderLink.folder_id == folder_id,
+        statement = self.restrict(
+            select(EmailFolderLink).where(
+                EmailFolderLink.email_id == email_id,
+                EmailFolderLink.folder_id == folder_id,
+            ),
+            EmailFolderLink,
         )
         existing = await self.session.scalar(statement)
         if existing is not None:
             return
-        self.session.add(
-            EmailFolderLink(
-                email_id=email_id,
-                folder_id=folder_id,
-                is_primary=primary,
-                status=status,
-            )
+        created = EmailFolderLink(
+            email_id=email_id,
+            folder_id=folder_id,
+            is_primary=primary,
+            status=status,
         )
+        self.stamp(created)
+        self.session.add(created)
         await self.session.flush()
 
     async def messages_for(self, slug: str, limit: int, offset: int) -> list[EmailMessage]:
         """Return messages in a folder, newest first."""
         statement = (
-            select(EmailMessage)
-            .join(EmailFolderLink, EmailFolderLink.email_id == EmailMessage.id)
-            .join(Folder, Folder.id == EmailFolderLink.folder_id)
-            .where(Folder.slug == slug, EmailFolderLink.status != "archived")
+            self.restrict(
+                select(EmailMessage)
+                .join(EmailFolderLink, EmailFolderLink.email_id == EmailMessage.id)
+                .join(Folder, Folder.id == EmailFolderLink.folder_id)
+                .where(Folder.slug == slug, EmailFolderLink.status != "archived"),
+                EmailMessage,
+                EmailFolderLink,
+                Folder,
+            )
             .order_by(EmailMessage.received_at.desc())
             .offset(offset)
             .limit(limit)
@@ -74,31 +85,36 @@ class FolderRepository(BaseRepository):
 
     async def unassigned_ids(self, limit: int = 50) -> list[int]:
         """Return processed emails that are not in any folder yet."""
-        linked = select(EmailFolderLink.email_id)
-        statement = (
-            select(EmailMessage.id)
-            .where(EmailMessage.processed_at.is_not(None), EmailMessage.id.not_in(linked))
-            .limit(limit)
-        )
+        linked = self.restrict(select(EmailFolderLink.email_id), EmailFolderLink)
+        statement = self.restrict(
+            select(EmailMessage.id).where(
+                EmailMessage.processed_at.is_not(None), EmailMessage.id.not_in(linked)
+            ),
+            EmailMessage,
+        ).limit(limit)
         return [int(value) for value in await self.session.scalars(statement)]
 
     async def add_opportunity(self, item: OpportunityItem) -> OpportunityItem:
         """Insert an opportunity row."""
+        self.stamp(item)
         self.session.add(item)
         await self.session.flush()
         return item
 
     async def opportunity_for_email(self, email_id: int, slug: str) -> OpportunityItem | None:
         """Return the opportunity row for one email and folder."""
-        statement = select(OpportunityItem).where(
-            OpportunityItem.email_id == email_id,
-            OpportunityItem.folder_slug == slug,
+        statement = self.restrict(
+            select(OpportunityItem).where(
+                OpportunityItem.email_id == email_id,
+                OpportunityItem.folder_slug == slug,
+            ),
+            OpportunityItem,
         )
         return await self.session.scalar(statement)
 
     async def set_opportunity_status(self, item_id: int, status: str) -> str:
         """Move an opportunity along its pipeline."""
-        item = await self.session.get(OpportunityItem, item_id)
+        item = self.visible(await self.session.get(OpportunityItem, item_id))
         if item is None:
             return ""
         item.status = status
@@ -106,20 +122,24 @@ class FolderRepository(BaseRepository):
 
     async def add_otp(self, entry: OtpEntry) -> OtpEntry:
         """Insert an OTP row."""
+        self.stamp(entry)
         self.session.add(entry)
         await self.session.flush()
         return entry
 
     async def otp_for_email(self, email_id: int) -> OtpEntry | None:
         """Return the OTP row for an email."""
-        statement = select(OtpEntry).where(OtpEntry.email_id == email_id)
+        statement = self.restrict(select(OtpEntry).where(OtpEntry.email_id == email_id), OtpEntry)
         return await self.session.scalar(statement)
 
     async def set_link_status(self, email_id: int, folder_id: int, status: str) -> None:
         """Update the status of one folder link when it exists."""
-        statement = select(EmailFolderLink).where(
-            EmailFolderLink.email_id == email_id,
-            EmailFolderLink.folder_id == folder_id,
+        statement = self.restrict(
+            select(EmailFolderLink).where(
+                EmailFolderLink.email_id == email_id,
+                EmailFolderLink.folder_id == folder_id,
+            ),
+            EmailFolderLink,
         )
         existing = await self.session.scalar(statement)
         if existing is not None:
@@ -129,20 +149,27 @@ class FolderRepository(BaseRepository):
         """Return opportunity rows for the given emails."""
         if not email_ids:
             return []
-        statement = select(OpportunityItem).where(OpportunityItem.email_id.in_(email_ids))
+        statement = self.restrict(
+            select(OpportunityItem).where(OpportunityItem.email_id.in_(email_ids)),
+            OpportunityItem,
+        )
         return list(await self.session.scalars(statement))
 
     async def otp_masks(self, email_ids: list[int]) -> dict[int, str]:
         """Return masked codes for the given emails."""
         if not email_ids:
             return {}
-        statement = select(OtpEntry).where(OtpEntry.email_id.in_(email_ids))
+        statement = self.restrict(
+            select(OtpEntry).where(OtpEntry.email_id.in_(email_ids)), OtpEntry
+        )
         rows = list(await self.session.scalars(statement))
         return {row.email_id: row.masked_code for row in rows}
 
     async def custom_rules(self) -> list[tuple[str, str]]:
         """Return custom folder slug and rule JSON."""
-        statement = select(Folder.slug, Folder.rule_json).where(Folder.is_custom.is_(True))
+        statement = self.restrict(
+            select(Folder.slug, Folder.rule_json).where(Folder.is_custom.is_(True)), Folder
+        )
         return [
             (str(slug), str(rule)) for slug, rule in (await self.session.execute(statement)).all()
         ]

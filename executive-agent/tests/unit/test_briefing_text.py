@@ -1,6 +1,5 @@
-"""Briefing text and Gemini model fallback."""
+"""Briefing text stays compact when a section is empty."""
 
-from app.ai.gemini_client import fallback_models
 from app.bot.formatters import digest
 from app.services.briefing_service import Digest
 
@@ -20,11 +19,3 @@ def test_empty_sections_do_not_say_none() -> None:
     )
     assert "Nothing needs attention." in text
     assert "\nNone" not in text
-
-
-def test_fallback_models_keep_the_preferred_name_first() -> None:
-    """Quota failures try the configured model before alternates."""
-    models = fallback_models("gemini-3.8-flash")
-    assert models[0] == "gemini-3.8-flash"
-    assert "gemini-3.5-flash" in models
-    assert len(models) == len(set(models))

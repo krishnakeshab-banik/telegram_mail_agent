@@ -18,6 +18,7 @@ from app.db.base import create_engine, create_session_factory
 from app.google.auth import GoogleAuth
 from app.google.calendar_client import CalendarClient, CalendarGateway, DemoCalendarClient
 from app.google.gmail_client import DemoGmailClient, GmailClient, MailboxClient
+from app.services.account_service import AccountService
 from app.services.approval_service import ApprovalService
 from app.services.attachment_service import AttachmentService
 from app.services.audit_service import AuditService
@@ -36,11 +37,11 @@ from app.services.query_service import QueryService
 from app.services.reminder_service import ReminderService
 from app.services.reply_service import ReplyService
 from app.services.reply_suggestion_service import ReplySuggestionService
-from app.services.signup_service import SignupService
 from app.services.sync_service import SyncService
 from app.services.task_service import TaskService
 from app.services.template_service import TemplateService
 from app.services.thread_service import ThreadService
+from app.services.user_service import UserService
 
 
 @dataclass
@@ -70,11 +71,13 @@ class Container:
     labels: LabelService
     threads: ThreadService
     gemini: GeminiClient
-    signups: SignupService
     folders: FolderService
     otp: OtpVault
     suggestions: ReplySuggestionService
     templates: TemplateService
+    users: UserService
+    accounts: AccountService
+    owner_id: int = 0
 
     async def aclose(self) -> None:
         """Close network clients and the database engine."""
@@ -93,23 +96,23 @@ def build_container(settings: Settings, *, data_dir: Path | None = None) -> Cont
     Returns:
         Ready container. Callers still need to bind the Telegram sender.
     """
+    sender = TelegramSender()
     root = data_dir or Path("data")
     root.mkdir(parents=True, exist_ok=True)
     engine = create_engine(settings.database_url)
     sessions = create_session_factory(engine)
     gemini = GeminiClient(
-        settings.gemini_api_key, requests_per_minute=settings.gemini_requests_per_minute
+        settings.gemini_api_key,
+        requests_per_minute=settings.gemini_requests_per_minute,
+        models=settings.model_chain,
     )
     auth = GoogleAuth(sessions, settings)
     mailbox, calendar_gateway = _gateways(settings, auth, root)
     sync = SyncService(sessions, mailbox)
-    signups = SignupService(sessions, settings, auth, sync)
     otp = OtpVault(sessions, settings.fernet_key)
     demo = settings.app_mode == "demo"
-    classifier = EmailClassifier(gemini, settings.gemini_model_fast, allow_offline=demo)
-    summarizer = Summarizer(
-        gemini, fast_model=settings.gemini_model_fast, smart_model=settings.gemini_model_smart
-    )
+    classifier = EmailClassifier(gemini, allow_offline=demo)
+    summarizer = Summarizer(gemini)
     preferences = PreferenceService(sessions, settings, gemini)
     contacts = ContactService(sessions)
     folders = FolderService(sessions, contacts, otp, preferences)
@@ -123,7 +126,7 @@ def build_container(settings: Settings, *, data_dir: Path | None = None) -> Cont
     replies = ReplyService(
         sessions,
         mailbox,
-        ReplyDrafter(gemini, settings.gemini_model_smart),
+        ReplyDrafter(gemini),
         approvals,
         preferences,
         contacts,
@@ -135,11 +138,22 @@ def build_container(settings: Settings, *, data_dir: Path | None = None) -> Cont
     approvals.register(ApprovalAction.UPDATE_EVENT, calendar.execute_update)
     approvals.register(ApprovalAction.DELETE_EVENT, calendar.execute_delete)
     approvals.register(ApprovalAction.APPLY_LABEL, labels.execute)
+    pipeline = EmailPipeline(sessions, classifier, contacts, preferences, reminders)
+    users = UserService(sessions, settings)
+    accounts = AccountService(sessions, settings, auth, sync, pipeline, preferences, users)
+
+    async def _notify(chat_id: int, text: str, buttons: object) -> None:
+        from app.bot.formatters import plain
+        from app.bot.keyboards.signup import markup
+
+        await sender.send_text(chat_id, plain(text), markup(buttons))
+
+    accounts.bind_notifier(_notify)
     container = Container(
         settings=settings,
         engine=engine,
         sessions=sessions,
-        sender=TelegramSender(),
+        sender=sender,
         preferences=preferences,
         contacts=contacts,
         audit=audit,
@@ -148,7 +162,7 @@ def build_container(settings: Settings, *, data_dir: Path | None = None) -> Cont
         reminders=reminders,
         followups=followups,
         sync=sync,
-        pipeline=EmailPipeline(sessions, classifier, contacts, preferences, reminders),
+        pipeline=pipeline,
         notifier=Notifier(sessions, preferences, contacts),
         calendar=calendar,
         attachments=AttachmentService(
@@ -158,8 +172,8 @@ def build_container(settings: Settings, *, data_dir: Path | None = None) -> Cont
         briefing=briefing,
         queries=QueryService(
             sessions,
-            IntentRouter(gemini, settings.gemini_model_fast, allow_local_fallback=demo),
-            MailSearcher(gemini, settings.gemini_model_smart),
+            IntentRouter(gemini, allow_local_fallback=demo),
+            MailSearcher(gemini),
             preferences,
             contacts,
             tasks,
@@ -171,12 +185,20 @@ def build_container(settings: Settings, *, data_dir: Path | None = None) -> Cont
         labels=labels,
         threads=ThreadService(sessions, summarizer),
         gemini=gemini,
-        signups=signups,
         folders=folders,
         otp=otp,
         suggestions=ReplySuggestionService(),
         templates=TemplateService(sessions),
+        users=users,
+        accounts=accounts,
     )
+
+    async def _tell_admins(text: str) -> None:
+        from app.services.admin_alert import alert_admins
+
+        await alert_admins(container, text)
+
+    gemini.set_chain_handler(_tell_admins)
     return container
 
 

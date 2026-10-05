@@ -57,6 +57,25 @@ These acceptance checks were not all run against a live inbox in this session: a
 - Gmail Pub/Sub push is not wired. `SyncService.sync_inbox` is the place a push handler would call later.
 - Demo sends are written to `data/demo_outbox.jsonl`. They are not delivered to a real recipient.
 
+## Multi-user cleanup on 2026-10-05
+
+`python -m pytest`: 56 passed. `python -m ruff check app tests scripts`: clean. `python -m mypy app`: clean (138 files).
+
+| Check | Result |
+| --- | --- |
+| Menu is exactly `/start /today /brief /meet /deadlines /tasks /folders /waiting /mail /search /settings /help` | `tests/unit/test_bot_profile.py` |
+| Hidden aliases resolve, and merged commands share one handler | same file |
+| Two users can store the same Gmail id, folder slug, preference key, provider, template name, and contact email | `tests/integration/test_user_uniques.py` |
+| Typing DELETE removes every `user_id` row for that user only. Any other word cancels | same file |
+| `members` is not created by the finished migration | same file |
+| With the console off, `/` and `/api/logs` are 404. `/health` has no mailbox data | `tests/integration/test_signup_oauth.py` |
+| No model name string under `app/` | `tests/unit/test_model_chain.py` |
+| A 404 then a success uses the next chain entry. A full failure alerts once | same file |
+
+A copy of the live database, `data/executive_agent.copy.db`, was upgraded from `0003_folders` to `0006_user_uniques`. The six unique keys are `(user_id, natural key)`. `members` is gone. Two users inserted the same `gmail_message_id` on that copy, then the insert was rolled back. The live database upgrades when the process starts. A later start applied `0004` through `0006` to the live file.
+
+Reminders and meeting scheduling were not changed. `/today` and `/meet` only read events that are already on the calendar.
+
 ## Safety that is in the code
 
 - The bot ignores Telegram users who are not in `TELEGRAM_ALLOWED_USER_IDS`.

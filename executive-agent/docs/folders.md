@@ -12,8 +12,8 @@ One email can sit in several folders. The first match is the primary folder. Che
 | `/meets` | Meetings and invites. Prev / Next pages of 5 |
 | `/deadlines` | Upcoming and "Missed or overdue". A past due date is never described as hours left |
 | `/tasks` | Explicit asks only. Newsletter buttons are dropped |
-| `/waiting` | Mail that still needs a reply, with reply buttons 1, 2, and 3 |
-| `/important` | Higher-importance mail |
+| `/waiting` | Replies you owe and replies you are waiting on. `/followups` is the same command |
+| `/important` | The Important section of `/brief` |
 | `/jobs` `/hackathons` `/events` `/scholarships` `/opportunities` | Opportunity cards with a fit score. Buttons: Interested, Applied, Not for me |
 | `/bills` `/orders` `/travel` `/finance` `/academics` | Money and life views |
 | `/otps` | Masked codes such as `•••• 03`. No push alert. Reveal shows the code and that Telegram message is deleted after 60 seconds. Bodies older than 24 hours are cleared |
@@ -41,4 +41,4 @@ Say `create folder Research for emails from my professor and arXiv`. The bot rep
 
 ## What is still local-only
 
-Topics mode, resume upload, voice notes, a Sunday weekly review, scheduled send, and meeting prep at 24 hours / 1 hour / 10 minutes are not wired yet. Opportunity scores use the interest profile and phrase rules. The same posting is not yet collapsed across mailing lists.
+Resume upload, voice notes, a Sunday weekly review, scheduled send, and meeting prep at 24 hours / 1 hour / 10 minutes are not wired yet. Opportunity scores use the interest profile and phrase rules. The same posting is not yet collapsed across mailing lists. Neglected-reply nudges at 4 hours, 24 hours, and 48 hours stay in the plan; one follow-up nudge interval runs today.

@@ -32,6 +32,7 @@ class Digest:
     focus: str
     waiting_on_you: list[str] = field(default_factory=list)
     waiting_on_others: list[str] = field(default_factory=list)
+    unread: list[str] = field(default_factory=list)
 
 
 class BriefingService:
@@ -71,15 +72,22 @@ class BriefingService:
         """Build the evening wrap-up from what is still open."""
         return await self._digest("Evening wrap-up", focus=False)
 
-    async def _digest(self, title: str, *, focus: bool) -> Digest:
+    async def important_lines(self) -> list[str]:
+        """Return the same Important lines the morning briefing uses."""
         prefs = await self._preferences.get()
-        local_now = to_local(utcnow(), prefs.timezone)
-        day_end = local_now.replace(hour=23, minute=59, second=0, microsecond=0)
-        week_end = local_now + timedelta(days=7)
-        important = await self._important(prefs.importance_threshold)
-        meetings = await self._meetings(local_now, day_end)
-        deadlines = await self._deadlines(week_end)
-        tasks = [task.title for task in await self._tasks.list_open()][:8]
+        return await self._important(prefs.importance_threshold)
+
+    async def unread_lines(self) -> list[str]:
+        """Return the same Unread lines the morning briefing uses."""
+        async with session_scope(self._sessions) as session:
+            messages = await EmailRepository(session).list_unread(limit=8)
+        return [
+            f"{message.sender_name or message.sender_email}: {message.subject}"
+            for message in messages
+        ]
+
+    async def waiting_lines(self) -> tuple[list[str], list[str]]:
+        """Return replies owed and replies still outstanding."""
         open_loops = await self._followups.list_open()
         waiting_on_you = [
             item.subject or item.counterpart_email
@@ -91,6 +99,43 @@ class BriefingService:
             for item in open_loops
             if item.direction == FollowUpDirection.OUTBOUND_AWAITING
         ][:8]
+        return waiting_on_you, waiting_on_others
+
+    async def today_lines(self) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+        """Return today's meetings, deadlines inside 24 hours, and pending replies."""
+        prefs = await self._preferences.get()
+        local_now = to_local(utcnow(), prefs.timezone)
+        day_end = local_now.replace(hour=23, minute=59, second=0, microsecond=0)
+        events = await self._calendar.list_window(local_now, day_end)
+        meetings = [
+            (
+                f"{format_local(item.start, prefs.timezone, '%H:%M')} {item.title}",
+                item.link,
+            )
+            for item in events
+        ]
+        horizon = utcnow() + timedelta(hours=24)
+        async with session_scope(self._sessions) as session:
+            rows = await DeadlineRepository(session).list_open()
+        deadlines = [
+            row.title
+            for row in rows
+            if row.status != TaskStatus.DONE and row.due_at is not None and row.due_at <= horizon
+        ][:8]
+        pending, _others = await self.waiting_lines()
+        return meetings, deadlines, pending
+
+    async def _digest(self, title: str, *, focus: bool) -> Digest:
+        prefs = await self._preferences.get()
+        local_now = to_local(utcnow(), prefs.timezone)
+        day_end = local_now.replace(hour=23, minute=59, second=0, microsecond=0)
+        week_end = local_now + timedelta(days=7)
+        important = await self.important_lines()
+        unread = await self.unread_lines()
+        meetings = await self._meetings(local_now, day_end)
+        deadlines = await self._deadlines(week_end)
+        tasks = [task.title for task in await self._tasks.list_open()][:8]
+        waiting_on_you, waiting_on_others = await self.waiting_lines()
         followups = waiting_on_you + waiting_on_others
         focus_line = ""
         facts = "\n".join(important + meetings + deadlines + tasks + followups)
@@ -106,6 +151,7 @@ class BriefingService:
             focus_line,
             waiting_on_you,
             waiting_on_others,
+            unread,
         )
 
     async def _important(self, threshold: int) -> list[str]:

@@ -2,21 +2,23 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text
+from sqlalchemy import Boolean, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.constants import EmailDirection, NotificationStatus
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class EmailMessage(Base):
+class EmailMessage(OwnedMixin, Base):
     """One Gmail message, processed at most once."""
 
     __tablename__ = "emails"
+    __table_args__ = (UniqueConstraint("user_id", "gmail_message_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    gmail_message_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    gmail_message_id: Mapped[str] = mapped_column(String(64), index=True)
     thread_id: Mapped[str] = mapped_column(String(64), index=True)
     history_id: Mapped[str] = mapped_column(String(64), default="")
     sender_email: Mapped[str] = mapped_column(String(320), index=True, default="")

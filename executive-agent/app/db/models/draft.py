@@ -6,10 +6,11 @@ from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class DraftReply(Base):
+class DraftReply(OwnedMixin, Base):
     """Generated reply, including whether the user edited it before sending."""
 
     __tablename__ = "draft_replies"

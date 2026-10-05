@@ -15,7 +15,7 @@ from app.db.models.email_folder_link import EmailFolderLink
 from app.db.models.folder import Folder
 from app.db.models.followup import FollowUp
 from app.db.models.job_error import JobError
-from app.db.models.member import Member
+from app.db.models.oauth_state import OAuthState
 from app.db.models.oauth_token import OAuthToken
 from app.db.models.opportunity_item import OpportunityItem
 from app.db.models.otp_entry import OtpEntry
@@ -26,6 +26,7 @@ from app.db.models.reply_template import ReplyTemplate
 from app.db.models.style_note import StyleNote
 from app.db.models.sync_state import SyncState
 from app.db.models.task import Task
+from app.db.models.user import User
 
 __all__ = [
     "AgentState",
@@ -45,7 +46,7 @@ __all__ = [
     "OtpEntry",
     "FollowUp",
     "JobError",
-    "Member",
+    "OAuthState",
     "OAuthToken",
     "PendingInteraction",
     "Preference",
@@ -54,4 +55,5 @@ __all__ = [
     "StyleNote",
     "SyncState",
     "Task",
+    "User",
 ]

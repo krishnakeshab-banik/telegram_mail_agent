@@ -14,28 +14,33 @@ class FollowUpRepository(BaseRepository):
 
     async def get(self, followup_id: int) -> FollowUp | None:
         """Return one follow-up."""
-        return await self.session.get(FollowUp, followup_id)
+        return self.visible(await self.session.get(FollowUp, followup_id))
 
     async def add(self, followup: FollowUp) -> FollowUp:
         """Insert a follow-up."""
+        self.stamp(followup)
         self.session.add(followup)
         await self.session.flush()
         return followup
 
     async def find_open_for_email(self, email_id: int) -> FollowUp | None:
         """Return an open follow-up already created for an email."""
-        statement = select(FollowUp).where(
-            FollowUp.email_id == email_id,
-            FollowUp.status.in_([FollowUpStatus.OPEN, FollowUpStatus.SNOOZED]),
+        statement = self.restrict(
+            select(FollowUp).where(
+                FollowUp.email_id == email_id,
+                FollowUp.status.in_([FollowUpStatus.OPEN, FollowUpStatus.SNOOZED]),
+            ),
+            FollowUp,
         )
         return await self.session.scalar(statement)
 
     async def list_open(self, now: datetime) -> list[FollowUp]:
         """Return follow-ups that are open or whose snooze elapsed."""
-        statement = (
+        statement = self.restrict(
             select(FollowUp)
             .where(FollowUp.status.in_([FollowUpStatus.OPEN, FollowUpStatus.SNOOZED]))
-            .order_by(FollowUp.due_at.asc().nulls_last(), FollowUp.id.asc())
+            .order_by(FollowUp.due_at.asc().nulls_last(), FollowUp.id.asc()),
+            FollowUp,
         )
         rows = list(await self.session.scalars(statement))
         visible: list[FollowUp] = []

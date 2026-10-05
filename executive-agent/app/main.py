@@ -67,19 +67,28 @@ def _install_lifecycle(
         raise ConfigurationError("Application wiring failed.")
 
     async def post_init(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
+        from app.db.user_context import user_scope
+
+        owner = await container.users.ensure_owner()
+        container.owner_id = owner.id
         container.sender.bind(app.bot)
-        scheduler.start()  # type: ignore[attr-defined]
-        app.bot_data["health_server"] = await serve_health(port)
-        from app.services.startup_check import run_startup_checks
+        with user_scope(owner.id):
+            scheduler.start()  # type: ignore[attr-defined]
+            app.bot_data["health_server"] = await serve_health(
+                port,
+                on_oauth=container.accounts.web_callback,
+                console=container.settings.console_enabled,
+            )
+            from app.services.startup_check import run_startup_checks
 
-        await run_startup_checks(container)
-        await container.folders.backfill()
-        from app.bot.profile import publish_bot_profile
+            await run_startup_checks(container)
+            await container.folders.backfill()
+            from app.bot.profile import publish_bot_profile
 
-        try:
-            await publish_bot_profile(app.bot)
-        except Exception as exc:
-            logger.warning("bot_profile_update_failed", error_type=type(exc).__name__)
+            try:
+                await publish_bot_profile(app.bot)
+            except Exception as exc:
+                logger.warning("bot_profile_update_failed", error_type=type(exc).__name__)
 
     async def post_shutdown(app: Application[Any, Any, Any, Any, Any, Any]) -> None:
         scheduler.shutdown(wait=False)  # type: ignore[attr-defined]

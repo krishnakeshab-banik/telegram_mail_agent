@@ -7,10 +7,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.constants import TaskStatus
 from app.db.base import Base, UtcDateTime
+from app.db.models.owned import OwnedMixin
 from app.utils.time import utcnow
 
 
-class Task(Base):
+class Task(OwnedMixin, Base):
     """Actionable work item with an optional due time."""
 
     __tablename__ = "tasks"

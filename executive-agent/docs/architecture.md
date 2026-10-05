@@ -51,4 +51,6 @@ Sync stores a Gmail history id. A later Pub/Sub push handler can call `SyncServi
 
 ## Schema
 
-`emails` stores each Gmail id once. `email_analyses` stores the classification. `tasks`, `deadlines`, `calendar_events`, and `followups` are derived records. `approvals` holds encrypted payloads until you confirm or they expire. `audit_logs` is append-only. `oauth_tokens` stores ciphertext only. `contacts` and `preferences` are the personalization state you can inspect with `/preferences`.
+`users` is the account. Owned tables carry `user_id`, and a repository will not run without that id. `emails` stores each Gmail id once per user. `email_analyses` stores the classification. `tasks`, `deadlines`, `calendar_events`, and `followups` are derived records. `approvals` holds encrypted payloads until you confirm or they expire. `audit_logs` is append-only. `oauth_tokens` stores ciphertext only. `contacts` and `preferences` are the personalization state, reached from `/settings`.
+
+Migrations run from `0001_initial` through `0006_user_uniques`. `0004` adds users. `0005` adds one-time OAuth state. `0006` makes the natural keys unique per user, drops the old `members` table, and stores whether reminders override quiet hours.

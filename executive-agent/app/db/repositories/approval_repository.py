@@ -14,23 +14,29 @@ class ApprovalRepository(BaseRepository):
 
     async def get(self, approval_id: int) -> Approval | None:
         """Return one approval."""
-        return await self.session.get(Approval, approval_id)
+        return self.visible(await self.session.get(Approval, approval_id))
 
     async def add(self, approval: Approval) -> Approval:
         """Insert an approval."""
+        self.stamp(approval)
         self.session.add(approval)
         await self.session.flush()
         return approval
 
     async def list_pending(self) -> list[Approval]:
         """Return approvals that are still waiting."""
-        statement = select(Approval).where(Approval.status == ApprovalStatus.PENDING)
+        statement = self.restrict(
+            select(Approval).where(Approval.status == ApprovalStatus.PENDING), Approval
+        )
         return list(await self.session.scalars(statement))
 
     async def list_expired(self, moment: datetime) -> list[Approval]:
         """Return pending approvals whose expiry has passed."""
-        statement = select(Approval).where(
-            Approval.status == ApprovalStatus.PENDING,
-            Approval.expires_at <= moment,
+        statement = self.restrict(
+            select(Approval).where(
+                Approval.status == ApprovalStatus.PENDING,
+                Approval.expires_at <= moment,
+            ),
+            Approval,
         )
         return list(await self.session.scalars(statement))

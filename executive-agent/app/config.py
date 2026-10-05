@@ -19,8 +19,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_allowed_user_ids: str = ""
     gemini_api_key: str = ""
-    gemini_model_fast: str = "gemini-3.8-flash"
-    gemini_model_smart: str = "gemini-3.8-flash"
+    gemini_model_chain: str = ""
     google_client_id: str = ""
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8080/"
@@ -42,11 +41,20 @@ class Settings(BaseSettings):
     log_json: bool = True
     apply_gmail_labels: bool = False
     health_port: int = 8081
+    console_enabled: bool = False
     followup_nudge_hours: int = 48
     reminder_lead_minutes: str = "1440,120"
     google_requests_per_minute: int = 30
     gemini_requests_per_minute: int = 15
     fixture_dir: str = "tests/fixtures"
+    signup_mode: Literal["open", "invite", "closed"] = "open"
+    invite_code: str = ""
+    max_users: int = 100
+    admin_telegram_ids: str = ""
+    signup_throttle_seconds: int = 30
+    public_base_url: str = ""
+    body_retention_days: int = 30
+    oauth_state_ttl_seconds: int = 600
 
     @field_validator("log_level")
     @classmethod
@@ -63,6 +71,26 @@ class Settings(BaseSettings):
             if stripped:
                 parsed.add(int(stripped))
         return frozenset(parsed)
+
+    @property
+    def admin_ids(self) -> frozenset[int]:
+        """Telegram user ids allowed to run admin commands."""
+        parsed: set[int] = set()
+        for chunk in self.admin_telegram_ids.split(","):
+            stripped = chunk.strip()
+            if stripped:
+                parsed.add(int(stripped))
+        return frozenset(parsed)
+
+    @property
+    def model_chain(self) -> tuple[str, ...]:
+        """Model names from GEMINI_MODEL_CHAIN, in the order they should be tried."""
+        names: list[str] = []
+        for chunk in self.gemini_model_chain.split(","):
+            name = chunk.strip()
+            if name and name not in names:
+                names.append(name)
+        return tuple(names)
 
     @property
     def reminder_leads(self) -> tuple[int, ...]:

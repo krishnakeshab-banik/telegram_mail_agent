@@ -9,17 +9,13 @@ from app.utils.security import wrap_untrusted
 class Summarizer:
     """Summarize threads, attachments, and briefing facts."""
 
-    def __init__(self, gemini: GeminiClient, *, fast_model: str, smart_model: str) -> None:
-        """Store model names.
+    def __init__(self, gemini: GeminiClient) -> None:
+        """Store the shared Gemini client.
 
         Args:
-            gemini: Shared Gemini wrapper.
-            fast_model: Model used for attachments and focus lines.
-            smart_model: Model used for thread summaries.
+            gemini: Shared Gemini wrapper. The model chain lives on the client.
         """
         self._gemini = gemini
-        self._fast_model = fast_model
-        self._smart_model = smart_model
 
     async def summarize_thread(self, blocks: list[str]) -> ThreadSummarySchema:
         """Summarize a thread from oldest to newest.
@@ -35,7 +31,6 @@ class Summarizer:
             for index, block in enumerate(blocks, start=1)
         )
         payload = await self._gemini.generate_json(
-            model=self._smart_model,
             system_prompt=load_prompt("summarize_thread"),
             user_prompt=wrapped,
             schema=ThreadSummarySchema,
@@ -59,7 +54,6 @@ class Summarizer:
             ]
         )
         payload = await self._gemini.generate_json(
-            model=self._fast_model,
             system_prompt=load_prompt("summarize_attachment"),
             user_prompt=user_prompt,
             schema=AttachmentSummarySchema,
@@ -83,7 +77,6 @@ class Summarizer:
             Validated attachment summary.
         """
         payload = await self._gemini.generate_with_media(
-            model=self._fast_model,
             system_prompt=load_prompt("summarize_attachment"),
             user_prompt=wrap_untrusted("filename", filename),
             media=media,
@@ -104,7 +97,6 @@ class Summarizer:
         if not self._gemini.enabled:
             return ""
         payload = await self._gemini.generate_json(
-            model=self._fast_model,
             system_prompt=load_prompt("briefing_focus"),
             user_prompt=wrap_untrusted("briefing_facts", facts[:4000]),
             schema=FocusSchema,
